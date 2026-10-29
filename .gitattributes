@@ -1,0 +1,7 @@
+* text=auto
+*.cpp text eol=crlf
+*.h text eol=crlf
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf
+*.wav binary
+*.png binary
