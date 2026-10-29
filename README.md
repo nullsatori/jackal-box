@@ -27,10 +27,10 @@ C++20, CMake, [JUCE 8](https://juce.com) (VST3-хостинг, ASIO), Windows + 
 
 ## Сборка
 
-Windows (VS 2022):
+Windows (VS 2022 или новее, CMake сам найдёт установленную студию):
 
 ```
-cmake -B build -G "Visual Studio 17 2022" -A x64
+cmake -B build -A x64
 cmake --build build --config Release
 ```
 
