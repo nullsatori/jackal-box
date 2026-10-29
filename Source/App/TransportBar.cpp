@@ -1,29 +1,51 @@
 #include "TransportBar.h"
 
-#include "JackalLookAndFeel.h"
-
 #include <cmath>
 
 namespace jackal
 {
 
-TransportBar::TransportBar (EngineCore& c, AppSettings& s)
-    : core (c), settings (s)
+TransportBar::TransportBar (ProjectController& controller, EngineCore& c, AppSettings& s)
+    : c_ (controller), core (c), settings (s), fillButton (controller), swing (controller, "Swing"), master (controller, "Master")
 {
-    for (auto* comp : std::initializer_list<juce::Component*> { &playButton, &bpmLabel, &bpmSlider, &clickToggle, &clickGain, &position })
+    for (auto* b : std::initializer_list<juce::Button*> { &playButton, &recButton, &fillButton, &clickToggle })
     {
-        comp->setMouseClickGrabsKeyboardFocus (false);
-        addAndMakeVisible (comp);
+        styleButton (*b);
+        addAndMakeVisible (*b);
+    }
+    recButton.setColour (juce::TextButton::buttonOnColourId, palette::rec);
+    fillButton.setColour (juce::TextButton::buttonOnColourId, palette::nixie);
+
+    playButton.onClick = [this] { c_.togglePlay(); };
+    recButton.onClick = [this] { c_.setRecording (! c_.recording()); };
+
+    for (auto* l : { &position, &patternLetter, &cpu, &swingLabel, &masterLabel })
+        addAndMakeVisible (*l);
+    position.setJustificationType (juce::Justification::centred);
+    position.setColour (juce::Label::textColourId, palette::nixie);
+    position.setFont (monoFont (24.f, true));
+    patternLetter.setJustificationType (juce::Justification::centred);
+    patternLetter.setColour (juce::Label::textColourId, palette::nixie);
+    patternLetter.setFont (monoFont (24.f, true));
+    cpu.setFont (monoFont (12.f));
+    cpu.setJustificationType (juce::Justification::centredRight);
+    swingLabel.setText ("SWING", juce::dontSendNotification);
+    masterLabel.setText ("MASTER", juce::dontSendNotification);
+    for (auto* l : { &swingLabel, &masterLabel })
+    {
+        l->setFont (monoFont (11.f));
+        l->setColour (juce::Label::textColourId, palette::dim);
+        l->setJustificationType (juce::Justification::centredRight);
     }
 
-    playButton.setWantsKeyboardFocus (false);
-    clickToggle.setWantsKeyboardFocus (false);
-    playButton.onClick = [this] { togglePlay(); };
-
-    bpmSlider.setRange (kMinBpm, kMaxBpm, 1.0);
-    bpmSlider.setValue (settings.bpm(), juce::dontSendNotification);
-    bpmSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 56, 24);
-    bpmSlider.onValueChange = [this] { pushBpm (bpmSlider.getValue()); };
+    bpm.setRange (kMinBpm, kMaxBpm, 1.0);
+    bpm.setTextBoxStyle (juce::Slider::TextBoxRight, false, 56, 24);
+    bpm.setColour (juce::Slider::textBoxTextColourId, palette::nixie);
+    bpm.setColour (juce::Slider::trackColourId, palette::nixie.withAlpha (0.5f));
+    bpm.setMouseClickGrabsKeyboardFocus (false);
+    bpm.setWantsKeyboardFocus (false);
+    bpm.onValueChange = [this] { c_.setBpm (bpm.getValue()); };
+    addAndMakeVisible (bpm);
 
     clickToggle.setToggleState (settings.metronomeEnabled(), juce::dontSendNotification);
     clickToggle.onClick = [this] {
@@ -31,49 +53,45 @@ TransportBar::TransportBar (EngineCore& c, AppSettings& s)
         core.params().metronomeEnabled.store (on);
         settings.setMetronomeEnabled (on);
     };
-
     clickGain.setRange (0.0, 1.0, 0.01);
     clickGain.setValue (settings.metronomeGain(), juce::dontSendNotification);
+    clickGain.setMouseClickGrabsKeyboardFocus (false);
     clickGain.onValueChange = [this] {
         const auto g = static_cast<float> (clickGain.getValue());
         core.params().metronomeGain.store (g);
         settings.setMetronomeGain (g);
     };
-
-    position.setJustificationType (juce::Justification::centred);
-    position.setColour (juce::Label::textColourId, palette::nixie);
-    position.setFont (juce::FontOptions (28.0f, juce::Font::bold));
-
-    // push restored state into the engine
+    addAndMakeVisible (clickGain);
     core.params().metronomeEnabled.store (clickToggle.getToggleState());
     core.params().metronomeGain.store (static_cast<float> (clickGain.getValue()));
-    core.commands().push ({ CommandType::SetBpm, static_cast<float> (bpmSlider.getValue()), 0 });
+
+    swing.setRange (kMinSwing, kMaxSwing, 1.0);
+    swing.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+    swing.setDoubleClickReturnValue (true, 50.0);
+    swing.onValueChange = [this] { c_.setSwing (juce::roundToInt (swing.getValue())); };
+    addAndMakeVisible (swing);
+
+    master.setRange (-24.0, 6.0, 0.1);
+    master.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+    master.setDoubleClickReturnValue (true, -6.0);
+    master.onValueChange = [this] { c_.setMasterGainDb (static_cast<float> (master.getValue())); };
+    addAndMakeVisible (master);
 
     startTimerHz (30);
 }
 
-void TransportBar::pushBpm (double bpm)
-{
-    core.commands().push ({ CommandType::SetBpm, static_cast<float> (bpm), 0 });
-    settings.setBpm (bpm);
-}
-
-void TransportBar::togglePlay()
-{
-    const bool playing = core.transportSnapshot().playing;
-    core.commands().push ({ playing ? CommandType::Stop : CommandType::Play, 0.f, 0 });
-}
-
 void TransportBar::timerCallback()
 {
-    const auto s = core.transportSnapshot();
+    const auto s = c_.transport();
 
     if (s.playing != shownPlaying)
     {
         shownPlaying = s.playing;
-        playButton.setButtonText (s.playing ? "Stop" : "Play");
-        playButton.setColour (juce::TextButton::buttonColourId, s.playing ? palette::nixie.withAlpha (0.8f) : palette::panel);
+        playButton.setButtonText (s.playing ? "STOP" : "PLAY");
+        playButton.setToggleState (s.playing, juce::dontSendNotification);
     }
+    recButton.setToggleState (c_.recording(), juce::dontSendNotification);
+    fillButton.setToggleState (c_.fillHeld(), juce::dontSendNotification);
 
     int bar = 1, beat = 1;
     if (s.playing)
@@ -83,6 +101,26 @@ void TransportBar::timerCallback()
         beat = static_cast<int> (beats % kBeatsPerBar) + 1;
     }
     position.setText (juce::String (bar) + "." + juce::String (beat), juce::dontSendNotification);
+
+    const int pat = s.playing ? c_.snapshot().currentPattern : c_.editPatternIndex();
+    patternLetter.setText (juce::String::charToString (static_cast<juce::juce_wchar> ('A' + juce::jlimit (0, 7, pat))), juce::dontSendNotification);
+
+    const float load = c_.cpuLoad() * 100.f;
+    cpu.setText ("CPU " + juce::String (juce::roundToInt (load)) + "%", juce::dontSendNotification);
+    cpu.setColour (juce::Label::textColourId, load > 90.f ? palette::alarm : (load > 70.f ? palette::nixie : palette::dim));
+
+    if (c_.version() != shownVersion_)
+    {
+        shownVersion_ = c_.version();
+        if (! bpm.isMouseButtonDown())
+            bpm.setValue (c_.project().bpm, juce::dontSendNotification);
+        if (! swing.isMouseButtonDown())
+            swing.setValue (c_.editPattern().swing, juce::dontSendNotification);
+        if (! master.isMouseButtonDown())
+            master.setValue (c_.project().masterGainDb, juce::dontSendNotification);
+        swing.setTooltip ("Swing " + juce::String (c_.editPattern().swing) + " (pattern)");
+        master.setTooltip ("Master " + juce::String (c_.project().masterGainDb, 1) + " dB");
+    }
 }
 
 void TransportBar::paint (juce::Graphics& g)
@@ -90,20 +128,35 @@ void TransportBar::paint (juce::Graphics& g)
     g.fillAll (palette::panel);
     g.setColour (palette::neonCyan.withAlpha (0.4f));
     g.drawHorizontalLine (getHeight() - 1, 0.f, static_cast<float> (getWidth()));
+    g.setColour (palette::neonCyan);
+    g.setFont (monoFont (15.f, true));
+    g.drawText ("JACKAL BOX", getLocalBounds().removeFromRight (120).reduced (8, 0), juce::Justification::centredRight, false);
 }
 
 void TransportBar::resized()
 {
-    auto r = getLocalBounds().reduced (12, 12);
-    playButton.setBounds (r.removeFromLeft (96));
-    r.removeFromLeft (16);
-    position.setBounds (r.removeFromLeft (96));
-    r.removeFromLeft (16);
-    bpmLabel.setBounds (r.removeFromLeft (40));
-    bpmSlider.setBounds (r.removeFromLeft (260));
-    r.removeFromLeft (24);
-    clickToggle.setBounds (r.removeFromLeft (72));
-    clickGain.setBounds (r.removeFromLeft (160));
+    auto r = getLocalBounds().reduced (10, 12);
+    r.removeFromRight (120);
+    playButton.setBounds (r.removeFromLeft (72));
+    r.removeFromLeft (6);
+    recButton.setBounds (r.removeFromLeft (52));
+    r.removeFromLeft (6);
+    fillButton.setBounds (r.removeFromLeft (52));
+    r.removeFromLeft (12);
+    position.setBounds (r.removeFromLeft (70));
+    patternLetter.setBounds (r.removeFromLeft (30));
+    r.removeFromLeft (12);
+    bpm.setBounds (r.removeFromLeft (220));
+    r.removeFromLeft (12);
+    clickToggle.setBounds (r.removeFromLeft (62));
+    r.removeFromLeft (4);
+    clickGain.setBounds (r.removeFromLeft (80));
+    r.removeFromLeft (8);
+    swingLabel.setBounds (r.removeFromLeft (48));
+    swing.setBounds (r.removeFromLeft (40));
+    masterLabel.setBounds (r.removeFromLeft (56));
+    master.setBounds (r.removeFromLeft (40));
+    cpu.setBounds (r);
 }
 
 } // namespace jackal

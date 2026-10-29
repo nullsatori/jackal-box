@@ -1,7 +1,8 @@
 #pragma once
 
 #include "AppSettings.h"
-#include "Engine/EngineCore.h"
+#include "ProjectController.h"
+#include "Widgets.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -11,27 +12,37 @@ namespace jackal
 class TransportBar : public juce::Component, private juce::Timer
 {
 public:
-    TransportBar (EngineCore& core, AppSettings& settings);
+    TransportBar (ProjectController& controller, EngineCore& core, AppSettings& settings);
 
-    void togglePlay();
     void resized() override;
     void paint (juce::Graphics& g) override;
 
 private:
-    void timerCallback() override;
-    void pushBpm (double bpm);
+    struct FillButton : juce::TextButton
+    {
+        explicit FillButton (ProjectController& c) : juce::TextButton ("FILL"), controller (c) {}
+        void mouseDown (const juce::MouseEvent& e) override { juce::TextButton::mouseDown (e); controller.setFill (true); }
+        void mouseUp (const juce::MouseEvent& e) override { juce::TextButton::mouseUp (e); controller.setFill (false); }
+        ProjectController& controller;
+    };
 
+    void timerCallback() override;
+
+    ProjectController& c_;
     EngineCore& core;
     AppSettings& settings;
 
-    juce::TextButton playButton { "Play" };
-    juce::Label bpmLabel { {}, "BPM" };
-    juce::Slider bpmSlider { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
-    juce::ToggleButton clickToggle { "Click" };
+    juce::TextButton playButton { "PLAY" }, recButton { "REC" };
+    FillButton fillButton;
+    juce::Label position, patternLetter, cpu;
+    juce::Slider bpm { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
+    juce::ToggleButton clickToggle { "CLICK" };
     juce::Slider clickGain { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
-    juce::Label position { {}, "1.1" };
+    Knob swing, master;
+    juce::Label swingLabel, masterLabel;
 
     bool shownPlaying = false;
+    uint32_t shownVersion_ = 0;
 };
 
 } // namespace jackal

@@ -29,6 +29,15 @@ public:
     void setMonitorGainDb (float value);
     void setInputChannel (int value);
 
+    // stage 2
+    juce::String lastProjectPath() const;
+    juce::String midiInputId() const;
+    juce::String windowBounds() const;
+    juce::StringArray recentProjects() const;
+    void setLastProjectPath (const juce::String& path);   // also pushes it to the recent list
+    void setMidiInputId (const juce::String& id);
+    void setWindowBounds (const juce::String& bounds);
+
     void saveNow();
 
 private:

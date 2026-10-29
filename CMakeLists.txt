@@ -114,7 +114,18 @@ if(JACKAL_BUILD_APP)
         Source/App/TransportBar.cpp
         Source/App/MonitorPanel.cpp
         Source/App/LatencyDisplay.cpp
-        Source/App/DeviceSettingsPanel.cpp)
+        Source/App/DeviceSettingsPanel.cpp
+        Source/App/ProjectController.cpp
+        Source/App/ProjectFiles.cpp
+        Source/App/SampleLoader.cpp
+        Source/App/StepGrid.cpp
+        Source/App/TrackHeaders.cpp
+        Source/App/PatternStrip.cpp
+        Source/App/TrackPanel.cpp
+        Source/App/WaveformView.cpp
+        Source/App/GlitchPadBar.cpp
+        Source/App/StatusBar.cpp
+        Source/App/SettingsOverlay.cpp)
 
     target_compile_definitions(JackalBox PRIVATE
         JUCE_WEB_BROWSER=0

@@ -1,5 +1,7 @@
 #include "AudioEngine.h"
 
+#include <chrono>
+
 namespace jackal
 {
 
@@ -7,8 +9,62 @@ AudioEngine::AudioEngine() = default;
 
 AudioEngine::~AudioEngine()
 {
-    deviceManager_.removeAudioCallback (this);
+    stopAudio();
     deviceManager_.closeAudioDevice();
+}
+
+void AudioEngine::stopAudio()
+{
+    if (midiInput_ != nullptr)
+    {
+        midiInput_->stop();
+        midiInput_ = nullptr;
+    }
+    if (callbackAdded_)
+    {
+        deviceManager_.removeAudioCallback (this);
+        callbackAdded_ = false;
+    }
+}
+
+void AudioEngine::openMidiInput (const juce::String& identifier)
+{
+    if (midiInput_ != nullptr)
+    {
+        midiInput_->stop();
+        midiInput_ = nullptr;
+    }
+
+    if (identifier.isEmpty())
+        return;
+
+    midiInput_ = juce::MidiInput::openDevice (identifier, this);
+    if (midiInput_ != nullptr)
+        midiInput_->start();
+}
+
+juce::String AudioEngine::midiInputName() const
+{
+    return midiInput_ != nullptr ? midiInput_->getName() : juce::String();
+}
+
+juce::String AudioEngine::midiInputIdentifier() const
+{
+    return midiInput_ != nullptr ? midiInput_->getIdentifier() : juce::String();
+}
+
+void AudioEngine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message)
+{
+    // MIDI thread: three bytes into the SPSC queue, nothing else (SysEx is dropped)
+    if (message.isSysEx() || message.getRawDataSize() < 2 || message.getRawDataSize() > 3)
+        return;
+
+    const auto* raw = message.getRawData();
+    MidiEvent e;
+    e.status = raw[0];
+    e.data1 = raw[1];
+    e.data2 = message.getRawDataSize() > 2 ? raw[2] : uint8_t (0);
+    core_.midi().push (e);
 }
 
 void AudioEngine::initialise (const juce::XmlElement* savedState)
@@ -40,6 +96,7 @@ void AudioEngine::initialise (const juce::XmlElement* savedState)
     }
 
     deviceManager_.addAudioCallback (this);
+    callbackAdded_ = true;
 }
 
 bool AudioEngine::inputOpen() const
@@ -86,11 +143,18 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
                                                     float* const* outputChannelData, int numOutputChannels,
                                                     int numSamples, const juce::AudioIODeviceCallbackContext&)
 {
+    const auto t0 = std::chrono::steady_clock::now();
     core_.process (inputChannelData, numInputChannels, outputChannelData, numOutputChannels, numSamples);
+    const auto t1 = std::chrono::steady_clock::now();
+
+    const double budget = numSamples / sampleRate_;
+    if (budget > 0.0)
+        core_.cpuLoad().store (static_cast<float> (std::chrono::duration<double> (t1 - t0).count() / budget), std::memory_order_relaxed);
 }
 
 void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
+    sampleRate_ = device->getCurrentSampleRate() > 0.0 ? device->getCurrentSampleRate() : 48000.0;
     core_.prepare (device->getCurrentSampleRate(),
                    device->getCurrentBufferSizeSamples(),
                    device->getActiveInputChannels().countNumberOfSetBits(),

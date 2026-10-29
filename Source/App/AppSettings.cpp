@@ -14,6 +14,10 @@ namespace keys
     const juce::String monitorEnabled = "monitorEnabled";
     const juce::String monitorGainDb = "monitorGainDb";
     const juce::String inputChannel = "inputChannel";
+    const juce::String lastProjectPath = "lastProjectPath";
+    const juce::String midiInputId = "midiInputId";
+    const juce::String windowBounds = "windowBounds";
+    const juce::String recentProjects = "recentProjects";
 } // namespace keys
 
 AppSettings::AppSettings()
@@ -80,5 +84,29 @@ void AppSettings::setMetronomeGain (float value)    { set (keys::metronomeGain, 
 void AppSettings::setMonitorEnabled (bool value)    { set (keys::monitorEnabled, value); }
 void AppSettings::setMonitorGainDb (float value)    { set (keys::monitorGainDb, value); }
 void AppSettings::setInputChannel (int value)       { set (keys::inputChannel, value); }
+
+juce::String AppSettings::lastProjectPath() const { return file().getValue (keys::lastProjectPath); }
+juce::String AppSettings::midiInputId() const     { return file().getValue (keys::midiInputId); }
+juce::String AppSettings::windowBounds() const    { return file().getValue (keys::windowBounds); }
+
+juce::StringArray AppSettings::recentProjects() const
+{
+    return juce::StringArray::fromTokens (file().getValue (keys::recentProjects), ";", "");
+}
+
+void AppSettings::setLastProjectPath (const juce::String& path)
+{
+    set (keys::lastProjectPath, path);
+    auto recent = recentProjects();
+    recent.removeString (path);
+    recent.removeEmptyStrings();
+    recent.insert (0, path);
+    while (recent.size() > 8)
+        recent.remove (recent.size() - 1);
+    set (keys::recentProjects, recent.joinIntoString (";"));
+}
+
+void AppSettings::setMidiInputId (const juce::String& id)      { set (keys::midiInputId, id); }
+void AppSettings::setWindowBounds (const juce::String& bounds) { set (keys::windowBounds, bounds); }
 
 } // namespace jackal
