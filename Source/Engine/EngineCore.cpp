@@ -41,6 +41,13 @@ void EngineCore::releaseAll() noexcept
             if (retired_.push ({ Retired::Kind::Pattern, p }))
                 sequencer_.setPattern (i, nullptr, transport_);
 
+    if (const SongData* song = sequencer_.song())
+        if (retired_.push ({ Retired::Kind::Song, song }))
+            sequencer_.setSong (nullptr);
+    if (const MidiNoteMap* map = noteMap_.load (std::memory_order_acquire))
+        if (map != &kDefaultNoteMap && retired_.push ({ Retired::Kind::NoteMap, map }))
+            noteMap_.store (nullptr, std::memory_order_release);
+
     for (auto& pl : players_)
         pl.reset();
 
@@ -73,11 +80,44 @@ void EngineCore::applyCommand (const Command& c, SequencerContext& ctx) noexcept
         case CommandType::Play:
             transport_.play();
             playResets();
+            sequencer_.onPlay();
             break;
 
         case CommandType::Stop:
             transport_.stop();
             playResets();
+            sequencer_.onStop();
+            break;
+
+        case CommandType::SetSong:
+        {
+            const SongData* old = sequencer_.song();
+            if (old != nullptr && ! retired_.push ({ Retired::Kind::Song, old }))
+            {
+                ++dropped_;
+                break;
+            }
+            sequencer_.setSong (static_cast<const SongData*> (c.ptr));
+            break;
+        }
+
+        case CommandType::SetSongMode:     sequencer_.setSongMode (c.ivalue != 0, transport_.isPlaying()); break;
+        case CommandType::SetSongPosition: sequencer_.setSongPosition (c.ivalue, transport_.isPlaying()); break;
+
+        case CommandType::SetNoteMap:
+        {
+            const MidiNoteMap* old = noteMap_.load (std::memory_order_relaxed);
+            if (old != nullptr && old != &kDefaultNoteMap && ! retired_.push ({ Retired::Kind::NoteMap, old }))
+            {
+                ++dropped_;
+                break;
+            }
+            noteMap_.store (static_cast<const MidiNoteMap*> (c.ptr), std::memory_order_release);
+            break;
+        }
+
+        case CommandType::CaptureHits:
+            sequencer_.capture (ctx, c.ivalue);
             break;
 
         case CommandType::SetBpm:
@@ -98,7 +138,10 @@ void EngineCore::applyCommand (const Command& c, SequencerContext& ctx) noexcept
                 ++dropped_;
                 break;
             }
-            slot.swap (static_cast<InsertProcessor*> (const_cast<void*> (c.ptr)));
+            auto* next = static_cast<InsertProcessor*> (const_cast<void*> (c.ptr));
+            if (next != nullptr && nonRealtime_)
+                next->setNonRealtime (true);   // export core only; the live core never sets the flag
+            slot.swap (next);
             break;
         }
 
@@ -115,6 +158,7 @@ void EngineCore::applyCommand (const Command& c, SequencerContext& ctx) noexcept
             {
                 transport_.play();
                 playResets();
+                sequencer_.onPlay();
             }
             const LoopArm arm { c.ivalue & 0xFF, (c.ivalue >> 8) & 0xFF, ((c.ivalue >> 16) & 0xFF) != 0, target };
             if (! recorder_.arm (arm, transport_, sequencer_, transport_.positionSamples(), bank_.get (arm.slot)))
@@ -226,6 +270,8 @@ void EngineCore::playResets() noexcept
     strip_.reset();
     loopPlayer_.reset();
     lastLoopInfo_ = {};
+    midiFill_ = false;
+    songEndedReported_ = false;
     LoopResult r;
     recorder_.abort (r);
     handleLoopResult (r);
@@ -306,18 +352,11 @@ void EngineCore::processBlock (const float* const* in, int numIn, float* const* 
     }
     ctx.blockStart = transport_.positionSamples();
 
-    // (2) MIDI: NoteOn -> live hit (note % 12 = track 0..7), everything else ignored
+    // (2) MIDI through the note map
     MidiEvent midi;
     while (midi_.pop (midi))
-    {
-        const int type = midi.status & 0xF0;
-        if (type == 0x90 && midi.data2 > 0)
-        {
-            const int track = midi.data1 % 12;
-            if (track < kNumTracks)
-                sequencer_.liveHit (ctx, track, midi.data2);
-        }
-    }
+        handleMidi (midi, ctx);
+    ctx.fillHeld = ctx.fillHeld || midiFill_;
 
     // (3) continuous params, read once
     const bool metronomeEnabled = params_.metronomeEnabled.load (std::memory_order_relaxed);
@@ -402,6 +441,12 @@ void EngineCore::processBlock (const float* const* in, int numIn, float* const* 
         busR[t] = buses_[static_cast<std::size_t> (2 * t + 1)].data();
     }
     lTracks_ = pdc_.apply (busL, busR, n, trackLatency);
+    for (int t = 0; t < kNumTracks; ++t)
+    {
+        stemPtrs_[static_cast<std::size_t> (2 * t)] = busL[t];
+        stemPtrs_[static_cast<std::size_t> (2 * t + 1)] = busR[t];
+    }
+    stemSamples_ = n;
 
     // (8) sum buses into master
     for (int t = 0; t < kNumTracks; ++t)
@@ -504,6 +549,9 @@ void EngineCore::processBlock (const float* const* in, int numIn, float* const* 
         events_.push ({ EngineEventType::PadState, 0, 0, static_cast<uint8_t> (pad + 1) });
         lastPadState_ = pad;
     }
+    if (sequencer_.songEnded() && ! songEndedReported_)
+        events_.push ({ EngineEventType::SongEnded, 0, 0, 0 });
+    songEndedReported_ = sequencer_.songEnded();
     publishSnapshot();
 }
 
@@ -524,6 +572,12 @@ void EngineCore::publishSnapshot() noexcept
     snapPendingPad_.store (glitch_.pendingPad(), std::memory_order_relaxed);
     snapRecording_.store (recording_, std::memory_order_relaxed);
     snapDropped_.store (dropped_, std::memory_order_relaxed);
+    snapSongMode_.store (sequencer_.songMode(), std::memory_order_relaxed);
+    snapSongIndex_.store (sequencer_.songIndex(), std::memory_order_relaxed);
+    snapSongRepeat_.store (sequencer_.songRepeat(), std::memory_order_relaxed);
+    snapSongCursor_.store (sequencer_.songCursor(), std::memory_order_relaxed);
+    snapSongEnded_.store (sequencer_.songEnded(), std::memory_order_relaxed);
+    snapSongEndSample_.store (sequencer_.songEndSample(), std::memory_order_relaxed);
 
     uint16_t ov = 0;
     for (int c = 0; c < kNumChains; ++c)
@@ -606,7 +660,76 @@ SequencerSnapshot EngineCore::sequencerSnapshot() const noexcept
     s.pendingPad = static_cast<int8_t> (snapPendingPad_.load (std::memory_order_relaxed));
     s.recording = snapRecording_.load (std::memory_order_relaxed);
     s.droppedCommands = snapDropped_.load (std::memory_order_relaxed);
+    s.songMode = snapSongMode_.load (std::memory_order_relaxed);
+    s.songIndex = static_cast<int8_t> (snapSongIndex_.load (std::memory_order_relaxed));
+    s.songRepeat = static_cast<uint8_t> (snapSongRepeat_.load (std::memory_order_relaxed));
+    s.songCursor = static_cast<int8_t> (snapSongCursor_.load (std::memory_order_relaxed));
+    s.songEnded = snapSongEnded_.load (std::memory_order_relaxed);
+    s.songEndSample = snapSongEndSample_.load (std::memory_order_relaxed);
     return s;
+}
+
+void EngineCore::handleMidi (const MidiEvent& m, SequencerContext& ctx) noexcept
+{
+    const MidiNoteMap* mp = noteMap_.load (std::memory_order_acquire);
+    const MidiNoteMap& map = mp != nullptr ? *mp : kDefaultNoteMap;
+
+    const int ch = (m.status & 0x0F) + 1;
+    if (map.channel != 0 && ch != map.channel)
+        return;
+
+    const int type = m.status & 0xF0;
+    const bool on = type == 0x90 && m.data2 > 0;
+    const bool off = type == 0x80 || (type == 0x90 && m.data2 == 0);
+    if (! on && ! off)
+        return;   // CC, PC, pitch bend, clock: not the engine's business
+
+    const NoteBinding& b = map.notes[static_cast<std::size_t> (m.data1 & 0x7F)];
+    const int idx = b.index;
+    switch (b.action)
+    {
+        case NoteAction::TrackHit:
+            if (on)
+                sequencer_.liveHit (ctx, idx, m.data2);
+            break;
+        case NoteAction::Pad:
+            if (idx >= kNumPads)
+                break;
+            if (on)
+            {
+                sequencer_.setManualPad (idx);
+                glitch_.padDown (0, idx, transport_, transport_.positionSamples());
+            }
+            else
+            {
+                sequencer_.setManualPad (-1);
+                glitch_.padUp (0, idx);
+            }
+            break;
+        case NoteAction::Fill:
+            midiFill_ = on;
+            break;
+        case NoteAction::None:
+            break;
+    }
+}
+
+StemTaps EngineCore::stemTaps() const noexcept
+{
+    StemTaps t;
+    t.track = stemPtrs_;
+    t.guitar = { strip_.output (0), strip_.output (1) };
+    t.numSamples = stemSamples_;
+    return t;
+}
+
+void EngineCore::setNonRealtime (bool on) noexcept
+{
+    nonRealtime_ = on;
+    for (auto& chain : inserts_)
+        for (int sl = 0; sl < kSlotsPerChain; ++sl)
+            if (InsertProcessor* p = chain.slot (sl).get())
+                p->setNonRealtime (on);
 }
 
 } // namespace jackal

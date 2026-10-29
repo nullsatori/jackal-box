@@ -52,6 +52,113 @@ void Sequencer::reset() noexcept
     nextGlitchStep_ = 0;
     currentGlitchPad_ = 0;
     glitchSlot_ = -1;
+
+    pendingSongIndex_ = -1;
+    pendingSongMode_ = false;
+    songEnded_ = false;
+    songEndSample_ = -1;
+    scheduling_ = true;
+    songBroken_ = false;
+    songRepeat_ = 0;
+}
+
+void Sequencer::onPlay() noexcept
+{
+    songIndex_ = songCursor_;
+    const SongData* s = song();
+    if (songMode_ && s != nullptr && songEntryValid (*s, songIndex_))
+        currentPattern_ = s->entries[static_cast<std::size_t> (songIndex_)].pattern;
+}
+
+void Sequencer::onStop() noexcept
+{
+    songCursor_ = 0;
+    hitCount_ = 0;
+    onPlay();
+}
+
+bool Sequencer::songPlayable() const noexcept
+{
+    const SongData* s = song();
+    return s != nullptr && s->length > 0 && ! songBroken_ && (songIndex_ >= s->length || songEntryValid (*s, songIndex_));
+}
+
+int Sequencer::songIndex() const noexcept
+{
+    const SongData* s = song();
+    return (songMode_ && s != nullptr && ! songBroken_ && songEntryValid (*s, songIndex_)) ? songIndex_ : -1;
+}
+
+void Sequencer::setSong (const SongData* next) noexcept
+{
+    song_.store (next, std::memory_order_release);
+    songBroken_ = false;
+    const int len = next != nullptr ? next->length : 0;
+    songCursor_ = std::clamp (songCursor_, 0, std::max (0, len - 1));
+    if (pendingSongIndex_ >= len)
+        pendingSongIndex_ = len > 0 ? len - 1 : -1;
+}
+
+void Sequencer::setSongMode (bool on, bool playing) noexcept
+{
+    if (! on)
+    {
+        songMode_ = false;
+        pendingSongMode_ = false;
+        pendingSongIndex_ = -1;
+        songEnded_ = false;
+        scheduling_ = true;
+        songEndSample_ = -1;
+        songBroken_ = false;
+        return;
+    }
+
+    if (playing)
+    {
+        if (! songMode_)
+            pendingSongMode_ = true;
+        return;
+    }
+
+    songMode_ = true;
+    pendingSongMode_ = false;
+    pendingPattern_ = -1;
+    songRepeat_ = 0;
+    songIndex_ = songCursor_;
+    songBroken_ = false;
+    songEnded_ = false;
+    songEndSample_ = -1;
+    scheduling_ = true;
+    const SongData* s = song();
+    if (s != nullptr && songEntryValid (*s, songIndex_))
+        currentPattern_ = s->entries[static_cast<std::size_t> (songIndex_)].pattern;
+}
+
+void Sequencer::setSongPosition (int index, bool playing) noexcept
+{
+    const SongData* s = song();
+    if (s == nullptr || s->length == 0)
+        return;
+    const int i = std::clamp (index, 0, s->length - 1);
+
+    if (! playing)
+    {
+        songCursor_ = i;
+        if (songMode_)
+        {
+            songIndex_ = i;
+            songRepeat_ = 0;
+            songBroken_ = ! songEntryValid (*s, i);
+            if (! songBroken_)
+                currentPattern_ = s->entries[static_cast<std::size_t> (i)].pattern;
+        }
+        return;
+    }
+
+    if (songMode_)
+        pendingSongIndex_ = i;
+    else
+        songCursor_ = i;
 }
 
 const Pattern* Sequencer::patternAt (int index) const noexcept
@@ -102,6 +209,9 @@ void Sequencer::queuePattern (int index, bool playing) noexcept
 {
     if (index < 0 || index >= kNumPatterns)
         return;
+
+    if (songMode_ || pendingSongMode_)
+        setSongMode (false, playing);   // QueuePattern leaves the song
 
     if (playing)
     {
@@ -226,6 +336,9 @@ void Sequencer::fireRollHit (SequencerContext& ctx, int track, int64_t atSample)
 
 void Sequencer::processRange (SequencerContext& ctx, int64_t r0, int64_t r1) noexcept
 {
+    if (! scheduling_ || r1 <= r0)
+        return;
+
     const Pattern& pat = current();
     const auto& transport = ctx.transport;
     const int64_t b0 = ctx.blockStart;
@@ -331,19 +444,110 @@ void Sequencer::processRange (SequencerContext& ctx, int64_t r0, int64_t r1) noe
     }
 }
 
-void Sequencer::switchPattern (SequencerContext& ctx, double switchBeat, int64_t switchSample) noexcept
+void Sequencer::switchPattern (SequencerContext& ctx, int index, double switchBeat, int64_t switchSample) noexcept
 {
     if (currentGlitchPad_ > 0 && manualPad_ < 0)
         ctx.glitch.padUp (static_cast<int> (switchSample - ctx.blockStart), currentGlitchPad_ - 1);
     currentGlitchPad_ = 0;
 
-    currentPattern_ = pendingPattern_;
+    currentPattern_ = index;
     pendingPattern_ = -1;
     patternStartBeat_ = switchBeat;
     nextK_.fill (0);
     nextGlitchStep_ = 0;
     for (auto& r : rolls_)
         r.active = false;
+}
+
+int64_t Sequencer::firstBoundaryAtOrAfter (const Transport& transport, int64_t pos, double& beatOut) const noexcept
+{
+    const double cycle = static_cast<double> (currentBars() * kBeatsPerBar);
+    const double m = std::max (0.0, std::floor ((transport.beatAtSample (pos) - patternStartBeat_) / cycle));
+    double beat = patternStartBeat_ + m * cycle;
+    int64_t at = transport.sampleAtBeat (beat);
+    while (at < pos)
+    {
+        beat += cycle;
+        at = transport.sampleAtBeat (beat);
+    }
+    beatOut = beat;
+    return at;
+}
+
+void Sequencer::enterSong (SequencerContext& ctx, double beat, int64_t sample) noexcept
+{
+    pendingSongMode_ = false;
+    songMode_ = true;
+    pendingPattern_ = -1;
+    songRepeat_ = 0;
+    songBroken_ = false;
+    songEnded_ = false;
+    songEndSample_ = -1;
+    scheduling_ = true;
+    songIndex_ = songCursor_;
+    const SongData* s = song();
+    if (s == nullptr || s->length == 0)
+        return;
+    if (! songEntryValid (*s, songIndex_))
+    {
+        songBroken_ = true;
+        return;
+    }
+    switchPattern (ctx, s->entries[static_cast<std::size_t> (songIndex_)].pattern, beat, sample);
+}
+
+void Sequencer::handleSongBoundary (SequencerContext& ctx, double beat, int64_t sample) noexcept
+{
+    const SongData& s = *song();
+
+    if (pendingSongIndex_ >= 0)
+    {
+        const int i = pendingSongIndex_;
+        pendingSongIndex_ = -1;
+        songRepeat_ = 0;
+        if (! songEntryValid (s, i))
+        {
+            songBroken_ = true;
+            return;
+        }
+        songIndex_ = i;
+        switchPattern (ctx, s.entries[static_cast<std::size_t> (i)].pattern, beat, sample);
+        return;
+    }
+
+    if (songIndex_ >= 0 && songIndex_ < s.length
+        && songRepeat_ + 1 < std::max<int> (1, s.entries[static_cast<std::size_t> (songIndex_)].repeats))
+    {
+        ++songRepeat_;   // P stays, lanes keep running
+        return;
+    }
+
+    songRepeat_ = 0;
+    ++songIndex_;
+    if (songIndex_ >= s.length)
+    {
+        if (! s.loop)
+        {
+            songEnded_ = true;
+            songEndSample_ = sample;
+            scheduling_ = false;
+            for (auto& r : rolls_)
+                r.active = false;
+            if (currentGlitchPad_ > 0 && manualPad_ < 0)
+                ctx.glitch.padUp (static_cast<int> (sample - ctx.blockStart), currentGlitchPad_ - 1);
+            currentGlitchPad_ = 0;
+            songIndex_ = s.length - 1;
+            return;
+        }
+        songIndex_ = 0;
+    }
+
+    if (! songEntryValid (s, songIndex_))
+    {
+        songBroken_ = true;
+        return;
+    }
+    switchPattern (ctx, s.entries[static_cast<std::size_t> (songIndex_)].pattern, beat, sample);
 }
 
 void Sequencer::process (SequencerContext& ctx) noexcept
@@ -359,27 +563,73 @@ void Sequencer::process (SequencerContext& ctx) noexcept
     }
 
     const int64_t b0 = ctx.blockStart, b1 = b0 + ctx.numSamples;
+    int64_t pos = b0;
 
-    if (pendingPattern_ >= 0)
+    // Song cycle boundaries, the pending entry into the song and the pattern queue (bar), earliest first.
+    for (int guard = 0; guard < 1024; ++guard)
     {
-        double bar = std::floor (transport.beatAtSample (b0) / kBeatsPerBar) * kBeatsPerBar;
-        int64_t barAt = transport.sampleAtBeat (bar);
-        while (barAt < b0)
+        enum class Next { None, SongBoundary, EnterSong, QueuedBar } kind = Next::None;
+        int64_t at = b1;
+        double beat = 0.0;
+
+        if (songMode_ && songPlayable())
         {
-            bar += kBeatsPerBar;
-            barAt = transport.sampleAtBeat (bar);
+            if (scheduling_)
+            {
+                const double cycle = static_cast<double> (currentBars() * kBeatsPerBar);
+                const double endBeat = patternStartBeat_ + static_cast<double> (songRepeat_ + 1) * cycle;
+                const int64_t e = std::max (transport.sampleAtBeat (endBeat), pos);
+                if (e < b1)
+                {
+                    kind = Next::SongBoundary;
+                    at = e;
+                    beat = endBeat;
+                }
+            }
+        }
+        else if (pendingSongMode_)
+        {
+            double bb = 0.0;
+            const int64_t e = firstBoundaryAtOrAfter (transport, pos, bb);
+            if (e < b1)
+            {
+                kind = Next::EnterSong;
+                at = e;
+                beat = bb;
+            }
         }
 
-        if (barAt < b1)
+        if (! songMode_ && pendingPattern_ >= 0)
         {
-            processRange (ctx, b0, barAt);
-            switchPattern (ctx, bar, barAt);
-            processRange (ctx, barAt, b1);
-            return;
+            double bar = std::floor (transport.beatAtSample (pos) / kBeatsPerBar) * kBeatsPerBar;
+            int64_t barAt = transport.sampleAtBeat (bar);
+            while (barAt < pos)
+            {
+                bar += kBeatsPerBar;
+                barAt = transport.sampleAtBeat (bar);
+            }
+            if (barAt < at)
+            {
+                kind = Next::QueuedBar;
+                at = barAt;
+                beat = bar;
+            }
         }
+
+        if (kind == Next::None)
+            break;
+
+        processRange (ctx, pos, at);
+        if (kind == Next::SongBoundary)
+            handleSongBoundary (ctx, beat, at);
+        else if (kind == Next::EnterSong)
+            enterSong (ctx, beat, at);
+        else
+            switchPattern (ctx, pendingPattern_, beat, at);
+        pos = at;
     }
 
-    processRange (ctx, b0, b1);
+    processRange (ctx, pos, b1);
 }
 
 int Sequencer::currentBars() const noexcept
@@ -406,6 +656,13 @@ void Sequencer::liveHit (SequencerContext& ctx, int track, uint8_t velocity) noe
 
     const bool playing = ctx.transport.isPlaying();
     const Lane& lane = current().lanes[static_cast<std::size_t> (track)];
+
+    if (playing)
+    {
+        hits_[static_cast<std::size_t> (hitCount_ % kHitHistory)] = { ctx.blockStart, static_cast<uint8_t> (track),
+                                                                      static_cast<uint8_t> (std::clamp<int> (velocity, 1, 127)) };
+        ++hitCount_;
+    }
     const int len = laneLength (lane);
 
     Step step {};
@@ -429,6 +686,35 @@ void Sequencer::liveHit (SequencerContext& ctx, int track, uint8_t velocity) noe
         const int slot = static_cast<int> (((k % len) + len) % len);
         ctx.events.push ({ EngineEventType::StepRecorded, static_cast<uint8_t> (track), static_cast<uint8_t> (slot), step.velocity });
     }
+}
+
+void Sequencer::capture (SequencerContext& ctx, int bars) noexcept
+{
+    if (! ctx.transport.isPlaying())
+        return;
+
+    const auto& transport = ctx.transport;
+    const int64_t b0 = ctx.blockStart;
+    const double nb = static_cast<double> (std::clamp (bars, 1, kMaxBars) * kBeatsPerBar);
+    const int64_t from = transport.sampleAtBeat (transport.beatAtSample (b0) - nb);
+    const Pattern& pat = current();
+
+    const int64_t count = std::min<int64_t> (hitCount_, kHitHistory);
+    for (int64_t j = hitCount_ - count; j < hitCount_; ++j)
+    {
+        const HitRecord& h = hits_[static_cast<std::size_t> (j % kHitHistory)];
+        if (h.sample < from || h.sample >= b0)
+            continue;
+        const Lane& lane = pat.lanes[static_cast<std::size_t> (h.track)];
+        const int len = laneLength (lane);
+        const double kf = (transport.beatAtSample (h.sample) - patternStartBeat_) / stepBeats (lane.speed);
+        const auto k = static_cast<int64_t> (std::llround (kf));
+        const int slot = static_cast<int> (((k % len) + len) % len);
+        if (! ctx.events.push ({ EngineEventType::StepRecorded, h.track, static_cast<uint8_t> (slot), h.velocity }))
+            ++ctx.dropped;
+    }
+    if (! ctx.events.push ({ EngineEventType::CaptureDone, 0, 0, 0 }))
+        ++ctx.dropped;
 }
 
 } // namespace jackal

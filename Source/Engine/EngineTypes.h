@@ -30,7 +30,13 @@ enum class CommandType : uint8_t
     SetInsert,         // ivalue = chain | (slot << 8), ptr = InsertProcessor* or nullptr; old one is retired
     ArmLoop,           // ivalue = slot | (bars << 8) | (overdub << 16), ptr = Sample* (capacity >= loop length)
     CancelLoop,
-    StartCalibration, CancelCalibration
+    StartCalibration, CancelCalibration,
+    // stage 5
+    SetSong,           // ptr = const SongData* (engine owns it until retired); nullptr = no song
+    SetSongMode,       // ivalue 0/1
+    SetSongPosition,   // ivalue = entry 0..31; while playing the jump happens on the next cycle boundary
+    SetNoteMap,        // ptr = const MidiNoteMap* or nullptr (= kDefaultNoteMap); the old one is retired
+    CaptureHits        // ivalue = bars 1..4; results as StepRecorded ... CaptureDone
 };
 
 struct Command
@@ -89,6 +95,13 @@ struct SequencerSnapshot
     int8_t activePad = -1, pendingPad = -1;
     bool recording = false;
     uint32_t droppedCommands = 0;
+    // stage 5: song
+    bool songMode = false;
+    int8_t songIndex = -1;        // playing entry, -1 outside the song or when it is not playable
+    uint8_t songRepeat = 0;       // current repeat 0..repeats-1
+    int8_t songCursor = 0;        // entry Play starts from (stopped) / pending jump (playing), -1 = none
+    bool songEnded = false;
+    int64_t songEndSample = -1;   // transport sample of the song end, -1 until reached
 };
 
 struct ShakalSnapshot
@@ -103,7 +116,9 @@ enum class EngineEventType : uint8_t
     TrackHit, StepRecorded, GlitchRecorded, PadState,
     LoopRecorded,      // track = slot
     LoopAborted,       // track = slot
-    CalibrationDone    // value = 1 when done, 0 when failed
+    CalibrationDone,   // value = 1 when done, 0 when failed
+    CaptureDone,       // closes the StepRecorded batch of CaptureHits
+    SongEnded
 };
 
 struct EngineEvent
@@ -121,7 +136,7 @@ struct MidiEvent
 
 struct Retired
 {
-    enum class Kind : uint8_t { Pattern, Sample, Insert };
+    enum class Kind : uint8_t { Pattern, Sample, Insert, Song, NoteMap };
     Kind kind = Kind::Pattern;
     const void* ptr = nullptr;
 };

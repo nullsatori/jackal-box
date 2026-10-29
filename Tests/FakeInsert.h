@@ -55,6 +55,8 @@ struct FakeInsert : InsertProcessor
     }
 
     int latencySamples() const noexcept override { return delay.load(); }
+    void setNonRealtime (bool on) noexcept override { nonRealtime = on; }
+    std::atomic<bool> nonRealtime { false };
 
     static constexpr int kRing = 32768;
     std::vector<float> ring[2];

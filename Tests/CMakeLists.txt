@@ -28,7 +28,10 @@ add_executable(jackal_tests
     InsertChainTests.cpp
     LoopRecorderTests.cpp
     CalibrationTests.cpp
-    GuitarStripTests.cpp)
+    GuitarStripTests.cpp
+    SongTests.cpp
+    CaptureTests.cpp
+    MidiMapTests.cpp)
 
 target_link_libraries(jackal_tests PRIVATE jackal_engine jackal_model Catch2::Catch2WithMain)
 

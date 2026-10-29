@@ -5,6 +5,7 @@
 #include "GlitchProcessor.h"
 #include "PatternData.h"
 #include "SampleBank.h"
+#include "SongData.h"
 #include "TrackPlayer.h"
 #include "Transport.h"
 
@@ -41,11 +42,20 @@ struct SequencerContext
     uint32_t& dropped;
 };
 
+struct HitRecord
+{
+    int64_t sample = 0;
+    uint8_t track = 0, velocity = 0;
+};
+constexpr int kHitHistory = 4096;
+
 class Sequencer
 {
 public:
     void prepare (double sampleRate, int maxBlockSize);
     void reset() noexcept;   // Play/Stop: k = 0, P = 0, rolls off, pending = -1
+    void onPlay() noexcept;  // after reset() on Play: song state from the cursor
+    void onStop() noexcept;  // after reset() on Stop: cursor 0, hit history cleared
 
     const Pattern* patternAt (int index) const noexcept;
     // Replaces the pointer; the caller has already retired the old one.
@@ -70,6 +80,21 @@ public:
     // First pattern-cycle start strictly after `beat` (a boundary exactly at `beat` counts as passed).
     double nextCycleStartBeat (double beat) const noexcept;
 
+    // stage 5: song
+    const SongData* song() const noexcept { return song_.load (std::memory_order_acquire); }
+    void setSong (const SongData* next) noexcept;        // the caller has already retired the old one
+    void setSongMode (bool on, bool playing) noexcept;
+    void setSongPosition (int index, bool playing) noexcept;
+    bool songMode() const noexcept { return songMode_; }
+    int songIndex() const noexcept;
+    int songRepeat() const noexcept { return songRepeat_; }
+    int songCursor() const noexcept { return playing_ ? (songMode_ ? pendingSongIndex_ : songCursor_) : songCursor_; }
+    bool songEnded() const noexcept { return songEnded_; }
+    int64_t songEndSample() const noexcept { return songEndSample_; }
+
+    // stage 5: retro capture of live hits
+    void capture (SequencerContext&, int bars) noexcept;
+
 private:
     struct RollState
     {
@@ -87,7 +112,11 @@ private:
     void fire (SequencerContext&, int track, int offset, const TriggerParams&) noexcept;
     void fireRollHit (SequencerContext&, int track, int64_t at) noexcept;
     void processRange (SequencerContext&, int64_t r0, int64_t r1) noexcept;
-    void switchPattern (SequencerContext&, double switchBeat, int64_t switchSample) noexcept;
+    void switchPattern (SequencerContext&, int index, double switchBeat, int64_t switchSample) noexcept;
+    bool songPlayable() const noexcept;
+    void handleSongBoundary (SequencerContext&, double beat, int64_t sample) noexcept;
+    void enterSong (SequencerContext&, double beat, int64_t sample) noexcept;
+    int64_t firstBoundaryAtOrAfter (const Transport&, int64_t pos, double& beatOut) const noexcept;
     void resyncLanes (const Transport&, const Pattern& before, const Pattern& after) noexcept;
 
     std::array<std::atomic<const Pattern*>, kNumPatterns> patterns_ {};
@@ -101,6 +130,14 @@ private:
     int glitchSlot_ = -1;
     int manualPad_ = -1;
     bool playing_ = false;
+
+    std::atomic<const SongData*> song_ { nullptr };
+    bool songMode_ = false, pendingSongMode_ = false, songEnded_ = false, scheduling_ = true, songBroken_ = false;
+    int songIndex_ = 0, songRepeat_ = 0, songCursor_ = 0, pendingSongIndex_ = -1;
+    int64_t songEndSample_ = -1;
+
+    std::array<HitRecord, kHitHistory> hits_ {};
+    int64_t hitCount_ = 0;
 };
 
 } // namespace jackal

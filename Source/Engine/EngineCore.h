@@ -9,6 +9,7 @@
 #include "Inserts/Pdc.h"
 #include "LevelMeter.h"
 #include "Metronome.h"
+#include "MidiNoteMap.h"
 #include "SampleBank.h"
 #include "Sequencer.h"
 #include "TrackPlayer.h"
@@ -21,6 +22,15 @@
 
 namespace jackal
 {
+
+constexpr int kNumStems = 9;   // 8 tracks + guitar
+
+struct StemTaps
+{
+    std::array<const float*, 2 * kNumTracks> track {};
+    std::array<const float*, 2> guitar {};
+    int numSamples = 0;
+};
 
 // The only thing AudioEngine talks to. prepare() may allocate; process() never does.
 class EngineCore
@@ -46,6 +56,12 @@ public:
     InsertChain& insertChain (int chain) noexcept { return inserts_[static_cast<std::size_t> (chain)]; }
     const SampleBank& bank() const noexcept { return bank_; }   // tests read slots; the app never does
 
+    // stage 5: buses of the last processBlock (after 7c) and the guitar strip output; valid until the next process().
+    // Read only by the thread that calls process().
+    StemTaps stemTaps() const noexcept;
+    // Not the audio thread. Also applied to inserts installed later by SetInsert (see DEVIATIONS.md, stage 5).
+    void setNonRealtime (bool) noexcept;
+
     // Test builds only: skip steps 7a and 9a (regression E2). Never used by the app.
     void setFxDisabledForTests (bool off) noexcept { fxDisabled_ = off; }
 
@@ -60,6 +76,7 @@ private:
     void handleLoopResult (const LoopResult&) noexcept;
     void retireSample (const Sample*) noexcept;
     void playResets() noexcept;
+    void handleMidi (const MidiEvent&, SequencerContext&) noexcept;
 
     CommandQueue commands_;
     MidiQueue midi_;
@@ -96,6 +113,12 @@ private:
     uint32_t seed_ = 0x5A4C;
     uint32_t dropped_ = 0;
     int lastPadState_ = -1;
+    std::atomic<const MidiNoteMap*> noteMap_ { nullptr };
+    bool midiFill_ = false;
+    bool nonRealtime_ = false;
+    bool songEndedReported_ = false;
+    std::array<const float*, 2 * kNumTracks> stemPtrs_ {};
+    int stemSamples_ = 0;
 
     std::atomic<bool> snapPlaying_ { false };
     std::atomic<double> snapBpm_ { kDefaultBpm };
@@ -107,6 +130,9 @@ private:
     std::atomic<int> snapGlitchSlot_ { -1 }, snapActivePad_ { -1 }, snapPendingPad_ { -1 };
     std::atomic<bool> snapRecording_ { false };
     std::atomic<uint32_t> snapDropped_ { 0 };
+    std::atomic<bool> snapSongMode_ { false }, snapSongEnded_ { false };
+    std::atomic<int> snapSongIndex_ { -1 }, snapSongRepeat_ { 0 }, snapSongCursor_ { 0 };
+    std::atomic<int64_t> snapSongEndSample_ { -1 };
     std::atomic<float> cpuLoad_ { 0.f };
     std::array<std::atomic<float>, kNumChains> snapMacro_ {};
     std::array<std::atomic<uint8_t>, kNumChains> snapEngaged_ {};

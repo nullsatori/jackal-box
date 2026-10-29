@@ -42,6 +42,7 @@ public:
     int inputChannel() const noexcept { return monitor_.inputChannel(); }
     void setInputChannel (int c) noexcept { monitor_.setInputChannel (c); }
     int lastComp() const noexcept { return lastComp_; }
+    const float* output (int ch) const noexcept { return ch == 0 ? l_.data() : r_.data(); }   // what (7) added to the master
     static int startOffsetFor (int lMasterPath, int lGuitar, bool tapAmp) noexcept { return std::max (0, lMasterPath - (tapAmp ? 0 : lGuitar)); }
 
 private:

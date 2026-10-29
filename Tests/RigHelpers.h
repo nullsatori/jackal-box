@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
 #include <memory>
 #include <set>
 #include <vector>
@@ -114,6 +115,17 @@ struct OfflineRig
     void play() { cmd (CommandType::Play); }
     void param (int track, TrackParam p, float v) { core.params().params.set (trackParam (track, p), v); }
     void masterGainDb (float db) { core.params().params.set (masterParam (MasterParam::Gain), db); }
+    void stop() { cmd (CommandType::Stop); }
+
+    // stage 5
+    const SongData* setSong (const SongData& s) { auto* p = new SongData (s); cmd (CommandType::SetSong, 0, 0.f, p); return p; }
+    void songMode (bool on) { cmd (CommandType::SetSongMode, on ? 1 : 0); }
+    void songPosition (int i) { cmd (CommandType::SetSongPosition, i); }
+    const MidiNoteMap* noteMap (const MidiNoteMap* m) { cmd (CommandType::SetNoteMap, 0, 0.f, m); return m; }
+    const MidiNoteMap* noteMap (const MidiNoteMap& m) { return noteMap (new MidiNoteMap (m)); }
+    void capture (int bars) { cmd (CommandType::CaptureHits, bars); }
+    void midi (uint8_t status, uint8_t d1, uint8_t d2) { core.midi().push ({ status, d1, d2 }); }
+    SequencerSnapshot snapshot() const { return core.sequencerSnapshot(); }
 
     void drain (int64_t blockStart = -1)
     {
@@ -126,6 +138,10 @@ struct OfflineRig
                 delete static_cast<const Pattern*> (r.ptr);
             else if (r.kind == Retired::Kind::Sample)
                 retiredSamples.insert (static_cast<const Sample*> (r.ptr));
+            else if (r.kind == Retired::Kind::Song)
+                delete static_cast<const SongData*> (r.ptr);
+            else if (r.kind == Retired::Kind::NoteMap)
+                delete static_cast<const MidiNoteMap*> (r.ptr);
             // Insert: the test owns its FakeInsert objects
         }
         EngineEvent e;
@@ -203,6 +219,15 @@ struct OfflineRig
             setPattern (i, p.patterns[static_cast<std::size_t> (i)]);
     }
 };
+
+inline SongData songOf (std::initializer_list<std::pair<int, int>> entries, bool loop = true)
+{
+    SongData s;
+    s.loop = loop;
+    for (const auto& [p, n] : entries)
+        s.entries[s.length++] = { static_cast<int8_t> (p), static_cast<uint8_t> (n) };
+    return s;
+}
 
 // A pattern on the heap with one lane filled.
 inline std::unique_ptr<Pattern> laneAll (int lane, int length = 16, LaneSpeed speed = LaneSpeed::Normal)

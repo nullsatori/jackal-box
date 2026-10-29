@@ -28,6 +28,8 @@ add_library(jackal_engine STATIC
     Source/Engine/Sample.h
     Source/Engine/SampleBank.h
     Source/Engine/StepHash.h
+    Source/Engine/SongData.h
+    Source/Engine/MidiNoteMap.h
     Source/Engine/Voice.h
     Source/Engine/Voice.cpp
     Source/Engine/TrackPlayer.h
