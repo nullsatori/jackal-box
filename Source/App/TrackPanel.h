@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ProjectController.h"
+#include "InsertsTab.h"
 #include "ShakalSection.h"
 #include "WaveformView.h"
 #include "Widgets.h"
@@ -13,8 +14,8 @@
 namespace jackal
 {
 
-// Right panel with tabs: SRC (sample, slicing, knobs), FX (SHAKAL of the selected track),
-// STEP (inspector of the last touched step), MST (master SHAKAL and gain).
+// Right panel with tabs: SRC (sample, slicing, knobs), FX (SHAKAL of the selected track), VST (insert slots),
+// STEP (inspector of the last touched step), MST (master SHAKAL and gain), GTR (guitar SHAKAL).
 class TrackPanel : public juce::Component, private juce::Timer
 {
 public:
@@ -34,7 +35,8 @@ private:
     std::vector<juce::Component*> srcComponents();
     std::vector<juce::Component*> stepComponents();
 
-    std::array<juce::TextButton, 4> tabs { juce::TextButton ("SRC"), juce::TextButton ("FX"), juce::TextButton ("STEP"), juce::TextButton ("MST") };
+    std::array<juce::TextButton, 6> tabs { juce::TextButton ("SRC"), juce::TextButton ("FX"), juce::TextButton ("VST"),
+                                           juce::TextButton ("STEP"), juce::TextButton ("MST"), juce::TextButton ("GTR") };
     int shownTab_ = -1;
 
     ProjectController& c_;
@@ -53,7 +55,10 @@ private:
     juce::ComboBox condition;
     std::array<juce::TextButton, kMaxPlocksPerStep> plockButtons;
 
-    ShakalSection fx, mst;
+    ShakalSection fx, mst, gtr;
+public:
+    InsertsTab vst;
+private:
     Knob masterGain;
     juce::Label masterGainLabel;
 

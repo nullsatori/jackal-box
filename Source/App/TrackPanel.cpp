@@ -19,9 +19,10 @@ TrackPanel::TrackPanel (ProjectController& controller)
       velocity (controller, "Velocity"), ratchet (controller, "Ratchet"), velRamp (controller, "Vel ramp"),
       pitchRamp (controller, "Pitch ramp"), pitch (controller, "Step pitch"), sliceField (controller, "Slice"),
       probability (controller, "Probability"), nudge (controller, "Nudge"),
-      fx (controller, false), mst (controller, true), masterGain (controller, "Master gain")
+      fx (controller, -1), mst (controller, kMasterChain), gtr (controller, kGuitarChain), vst (controller),
+      masterGain (controller, "Master gain")
 {
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < static_cast<int> (tabs.size()); ++i)
     {
         auto& b = tabs[static_cast<std::size_t> (i)];
         styleButton (b);
@@ -31,6 +32,8 @@ TrackPanel::TrackPanel (ProjectController& controller)
     }
     addChildComponent (fx);
     addChildComponent (mst);
+    addChildComponent (gtr);
+    addChildComponent (vst);
 
     masterGain.setRange (kMasterGainSpec.minValue, kMasterGainSpec.maxValue, 0.1);
     masterGain.setDoubleClickReturnValue (true, kMasterGainDefaultDb);
@@ -193,16 +196,18 @@ std::vector<juce::Component*> TrackPanel::stepComponents()
 void TrackPanel::showTab (int tab)
 {
     shownTab_ = tab;
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < static_cast<int> (tabs.size()); ++i)
         tabs[static_cast<std::size_t> (i)].setToggleState (i == tab, juce::dontSendNotification);
     for (auto* comp : srcComponents())
         comp->setVisible (tab == 0);
     fx.setVisible (tab == 1);
+    vst.setVisible (tab == 2);
     for (auto* comp : stepComponents())
-        comp->setVisible (tab == 2);
-    mst.setVisible (tab == 3);
-    masterGain.setVisible (tab == 3);
-    masterGainLabel.setVisible (tab == 3);
+        comp->setVisible (tab == 3);
+    mst.setVisible (tab == 4);
+    masterGain.setVisible (tab == 4);
+    masterGainLabel.setVisible (tab == 4);
+    gtr.setVisible (tab == 5);
     refresh();
     repaint();
 }
@@ -302,7 +307,7 @@ void TrackPanel::refresh()
     {
         const auto& pl = st.plocks[static_cast<std::size_t> (i)];
         auto& b = plockButtons[static_cast<std::size_t> (i)];
-        b.setVisible (shownTab_ == 2 && pl.param < kNumTrackParams);
+        b.setVisible (shownTab_ == 3 && pl.param < kNumTrackParams);
         if (pl.param < kNumTrackParams)
             b.setButtonText (juce::String (std::string (kTrackParamSpecs[pl.param].label)) + " " + juce::String (pl.value, 2) + "  x");
     }
@@ -321,11 +326,13 @@ void TrackPanel::resized()
 {
     auto r = getLocalBounds();
     auto tabRow = r.removeFromTop (24).reduced (6, 2);
-    const int tw = tabRow.getWidth() / 4;
+    const int tw = tabRow.getWidth() / static_cast<int> (tabs.size());
     for (auto& b : tabs)
         b.setBounds (tabRow.removeFromLeft (tw).reduced (1, 0));
 
     fx.setBounds (r);
+    gtr.setBounds (r);
+    vst.setBounds (r);
     auto m = r;
     mst.setBounds (m.removeFromTop (m.getHeight() - 70));
     auto g = m.reduced (8, 4);

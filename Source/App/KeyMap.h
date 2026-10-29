@@ -20,7 +20,9 @@ enum CommandId : juce::CommandID
     rowUp = 0x2400, rowDown, shiftLeft, shiftRight, nudgeLeft, nudgeRight, pageUp, pageDown,
     doubleLen, mutateCmd, undoCmd, redoCmd, redoAlt,
     saveCmd, saveAsCmd, openCmd, newCmd, closeOverlay, deletePLocks,
-    nextTab   // stage 3: Tab cycles SRC / FX / STEP / MST
+    nextTab,  // stage 3: Tab cycles the panel tabs (six since stage 4)
+    // stage 4
+    loopEnter = 0x2500, loopRec, loopUndo, browseTrack, browseGuitar, toggleEditorCmd
 };
 
 constexpr std::array<char, 16> kStepKeys { 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K' };

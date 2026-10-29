@@ -38,6 +38,16 @@ public:
     void setMidiInputId (const juce::String& id);
     void setWindowBounds (const juce::String& bounds);
 
+    // stage 4
+    juce::StringArray vst3Paths() const;          // extra VST3 folders
+    void setVst3Paths (const juce::StringArray&);
+    double loopManualMs() const;                  // -50..+50
+    void setLoopManualMs (double);
+    bool loopUseMeasured() const;
+    void setLoopUseMeasured (bool);
+    int loopCal (const juce::String& deviceName) const;   // measured round trip in samples, -1 = none
+    void setLoopCal (const juce::String& deviceName, int samples);
+
     void saveNow();
 
 private:

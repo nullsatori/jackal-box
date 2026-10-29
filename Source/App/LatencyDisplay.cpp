@@ -32,7 +32,8 @@ void LatencyDisplay::timerCallback()
                 << " · Out " << ms (info.outputSamples) << " (" << info.outputSamples << ")"
                 << " · Buffer " << info.bufferSamples << " @ " << juce::roundToInt (info.sampleRate)
                 << " · Total " << ms (info.inputSamples + info.outputSamples)
-                << " · xruns " << (info.xrunCount >= 0 ? juce::String (info.xrunCount) : juce::String ("n/a"));
+                << " · xruns " << (info.xrunCount >= 0 ? juce::String (info.xrunCount) : juce::String ("n/a"))
+                << " · comp " << ms (engine.core().loopSnapshot().compTotal);
     }
 
     if (newText != text)

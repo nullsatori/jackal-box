@@ -41,6 +41,11 @@ public:
     juce::String midiInputName() const;
     juce::String midiInputIdentifier() const;
 
+    // Stage 4: loopCompSamples = (measured round trip for this device, or driver in + out) + manual offset.
+    // Message thread: at start, on device change, after a calibration and when the slider moves.
+    void updateLoopComp (const class AppSettings& settings);
+    juce::String deviceName() const;
+
     // Removes the audio callback and closes MIDI. After this the engine core is not running.
     void stopAudio();
 

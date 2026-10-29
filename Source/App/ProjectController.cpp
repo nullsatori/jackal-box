@@ -82,6 +82,25 @@ namespace
         MasterState before, after;
     };
 
+    struct GuitarAction : juce::UndoableAction
+    {
+        GuitarAction (ProjectController& c, GuitarSettings b, GuitarSettings a) : controller (c), before (std::move (b)), after (std::move (a)) {}
+
+        bool perform() override { controller.applyGuitar (after); return true; }
+        bool undo() override { controller.applyGuitar (before); return true; }
+        int getSizeInUnits() override { return kUndoUnitsPerAction; }
+
+        juce::UndoableAction* createCoalescedAction (juce::UndoableAction* next) override
+        {
+            if (auto* n = dynamic_cast<GuitarAction*> (next); n != nullptr)
+                return new GuitarAction (controller, before, n->after);
+            return nullptr;
+        }
+
+        ProjectController& controller;
+        GuitarSettings before, after;
+    };
+
     struct SlotAction : juce::UndoableAction
     {
         SlotAction (ProjectController& c, int s, SampleSlotSpec b, SampleSlotSpec a)
@@ -98,7 +117,8 @@ namespace
 } // namespace
 
 ProjectController::ProjectController (AudioEngine& engine, AppSettings& settings)
-    : engine_ (engine), settings_ (settings), project_ (std::make_unique<Project>())
+    : engine_ (engine), settings_ (settings), project_ (std::make_unique<Project>()),
+      plugins_ (settings), scanner_ (plugins_), inserts_ (engine, plugins_), loops_ (*this, engine)
 {
     undo_.setMaxNumberOfStoredUnits (200 * kUndoUnitsPerAction, 200);
     loader_ = std::make_unique<SampleLoader> ([this] (LoadedSample&& r) { onLoaded (std::move (r)); });
@@ -135,6 +155,8 @@ void ProjectController::shutdown()
         save();
 
     loader_ = nullptr;
+    scanner_.cancel();
+    inserts_.closeAllEditors();
     engine_.stopAudio();
     engine_.core().releaseAll();
     drainEngine();
@@ -455,11 +477,15 @@ void ProjectController::setMasterGainDb (float db)
 
 const FxSettings& ProjectController::fxSettings (int chain) const
 {
+    if (chain == kGuitarChain)
+        return project_->guitar.fx;
     return chain >= 0 && chain < kNumTracks ? project_->tracks[idx (chain)].fx : project_->masterFx;
 }
 
 float ProjectController::shakalValue (int chain) const
 {
+    if (chain == kGuitarChain)
+        return project_->guitar.shakal;
     return chain >= 0 && chain < kNumTracks ? project_->tracks[idx (chain)].params[idx (static_cast<int> (TrackParam::Shakal))]
                                             : project_->masterShakal;
 }
@@ -481,6 +507,13 @@ void ProjectController::setFx (int chain, FxParam p, float value)
             setStatus ("p-lock only on SHAKAL");
         editTrack (chain, [&] (TrackSettings& t) { apply (t.fx); });
     }
+    else if (chain == kGuitarChain)
+    {
+        GuitarSettings after = project_->guitar;
+        apply (after.fx);
+        if (! (after == project_->guitar))
+            undo_.perform (new GuitarAction (*this, project_->guitar, after));
+    }
     else
         editMaster ([&] (MasterState& m) { apply (m.fx); });
 }
@@ -490,6 +523,8 @@ void ProjectController::setShakal (int chain, float value)
     value = juce::jlimit (0.f, 1.f, value);
     if (chain >= 0 && chain < kNumTracks)
         setTrackParam (chain, TrackParam::Shakal, value);
+    else if (chain == kGuitarChain)
+        setGuitarParam (GuitarParam::Shakal, value);
     else
         editMaster ([value] (MasterState& m) { m.shakal = value; });
 }
@@ -504,7 +539,7 @@ void ProjectController::reroll()
 
 void ProjectController::setTrackPanelTab (int tab)
 {
-    project_->ui.trackPanelTab = ((tab % 4) + 4) % 4;
+    project_->ui.trackPanelTab = ((tab % 6) + 6) % 6;
     markDirty();
 }
 
@@ -515,6 +550,184 @@ void ProjectController::pushFx (int chain, const FxSettings& fx)
         table.set (fxParam (chain, static_cast<FxParam> (p)), fx.params[idx (p)]);
     table.set (fxParam (chain, FxParam::Bypass), fx.bypass ? 1.f : 0.f);
     table.set (fxParam (chain, FxParam::Preset), static_cast<float> (fx.preset));
+}
+
+void ProjectController::setGuitarParam (GuitarParam p, float value)
+{
+    value = clampGuitarParam (p, value);
+    GuitarSettings after = project_->guitar;
+    switch (p)
+    {
+        case GuitarParam::Shakal:     after.shakal = value; break;
+        case GuitarParam::GateDb:     after.gateDb = value; break;
+        case GuitarParam::HpfHz:      after.hpfHz = value; break;
+        case GuitarParam::LoopGainDb: after.loopGainDb = value; break;
+        case GuitarParam::LoopTap:    after.loopTap = value >= 0.5f ? LoopTap::Amp : LoopTap::Di; break;
+        case GuitarParam::Count:      return;
+    }
+    if (after == project_->guitar)
+        return;
+    undo_.perform (new GuitarAction (*this, project_->guitar, after));
+}
+
+void ProjectController::applyGuitar (const GuitarSettings& g)
+{
+    const auto inserts = project_->guitar.inserts;
+    project_->guitar = g;
+    project_->guitar.inserts = inserts;
+    pushGuitar();
+    markDirty();
+}
+
+void ProjectController::pushGuitar()
+{
+    auto& table = engine_.core().params().params;
+    const auto& g = project_->guitar;
+    table.set (guitarParam (GuitarParam::Shakal), g.shakal);
+    table.set (guitarParam (GuitarParam::GateDb), g.gateDb);
+    table.set (guitarParam (GuitarParam::HpfHz), g.hpfHz);
+    table.set (guitarParam (GuitarParam::LoopGainDb), g.loopGainDb);
+    table.set (guitarParam (GuitarParam::LoopTap), g.loopTap == LoopTap::Amp ? 1.f : 0.f);
+    pushFx (kGuitarChain, g.fx);
+}
+
+// ---------------------------------------------------------------------------- inserts (stage 4)
+
+InsertSlotSpec& ProjectController::insertSpecRef (int chain, int slot)
+{
+    auto& slots = chain == kMasterChain ? project_->masterInserts
+                : chain == kGuitarChain ? project_->guitar.inserts
+                                        : project_->tracks[idx (juce::jlimit (0, kNumTracks - 1, chain))].inserts;
+    return slots[idx (juce::jlimit (0, kSlotsPerChain - 1, slot))];
+}
+
+const InsertSlotSpec& ProjectController::insertSpec (int chain, int slot) const
+{
+    return const_cast<ProjectController*> (this)->insertSpecRef (chain, slot);
+}
+
+juce::String ProjectController::loadPlugin (int chain, int slot, const juce::PluginDescription& d)
+{
+    const auto error = inserts_.load (chain, slot, d, {});
+    if (error.isNotEmpty())
+    {
+        setStatus (error);
+        return error;
+    }
+    auto& spec = insertSpecRef (chain, slot);
+    spec = { d.createIdentifierString().toStdString(), d.name.toStdString(), {}, false };
+    engine_.core().params().params.set (insertParam (chain, slot, InsertParam::Bypass), 0.f);
+    lastInsert_ = { chain, slot };
+    setStatus ("loaded " + d.name + " into " + InsertHost::slotName (chain, slot));
+    markDirty();
+    return {};
+}
+
+void ProjectController::removePlugin (int chain, int slot)
+{
+    inserts_.remove (chain, slot);
+    insertSpecRef (chain, slot) = {};
+    engine_.core().params().params.set (insertParam (chain, slot, InsertParam::Bypass), 0.f);
+    markDirty();
+}
+
+void ProjectController::setInsertBypass (int chain, int slot, bool bypass)
+{
+    auto& spec = insertSpecRef (chain, slot);
+    if (spec.empty())
+        return;
+    spec.bypass = bypass;
+    engine_.core().params().params.set (insertParam (chain, slot, InsertParam::Bypass), bypass ? 1.f : 0.f);
+    lastInsert_ = { chain, slot };
+    markDirty();
+}
+
+void ProjectController::toggleEditor (int chain, int slot)
+{
+    inserts_.toggleEditor (chain, slot);
+    lastInsert_ = { chain, slot };
+    bump();
+}
+
+bool ProjectController::insertMissing (int chain, int slot) const
+{
+    return ! insertSpec (chain, slot).empty() && inserts_.live (chain, slot) == nullptr;
+}
+
+int ProjectController::insertLatency (int chain, int slot) const
+{
+    auto* p = inserts_.live (chain, slot);
+    return p != nullptr ? p->latencySamples() : 0;
+}
+
+void ProjectController::loadInserts()
+{
+    juce::StringArray missing;
+    for (int c = 0; c < kNumChains; ++c)
+        for (int s = 0; s < kSlotsPerChain; ++s)
+        {
+            const auto& spec = insertSpecRef (c, s);
+            engine_.core().params().params.set (insertParam (c, s, InsertParam::Bypass), spec.bypass ? 1.f : 0.f);
+            if (spec.empty())
+                continue;
+            auto d = plugins_.find (juce::String (spec.identifier));
+            const auto error = d != nullptr ? inserts_.load (c, s, *d, juce::String (spec.stateBase64)) : juce::String ("missing");
+            if (error.isNotEmpty())
+                missing.add (juce::String (spec.name));
+        }
+    if (! missing.isEmpty())
+        setStatus ("MISSING plugins: " + missing.joinIntoString (", "));
+}
+
+void ProjectController::captureInsertStates()
+{
+    for (int c = 0; c < kNumChains; ++c)
+        for (int s = 0; s < kSlotsPerChain; ++s)
+            if (inserts_.live (c, s) != nullptr)
+                insertSpecRef (c, s).stateBase64 = inserts_.stateBase64 (c, s).toStdString();
+    // a MISSING slot keeps the state it was loaded with
+}
+
+// ---------------------------------------------------------------------------- loops (stage 4)
+
+void ProjectController::setPatternLoopSlotRaw (int pattern, int slot)
+{
+    auto p = project_->patterns[idx (pattern)];
+    p.loopSlot = static_cast<int8_t> (slot);
+    applyPattern (pattern, p);
+}
+
+void ProjectController::setSlotSpecRaw (int slot, const SampleSlotSpec& spec)
+{
+    project_->slots[idx (slot)] = spec;
+    markDirty();
+}
+
+void ProjectController::adoptLoopSample (int slot, const Sample* s)
+{
+    auto& rt = slots_[idx (slot)];
+    ++rt.generation;   // a decode in flight for this slot is stale now
+    rt.live = s;
+    rt.sliceStarts = s != nullptr ? s->sliceStarts : std::vector<int64_t> {};
+    rt.peaks = s != nullptr ? computePeaks (*s) : WavePeaks {};
+    bump();
+}
+
+void ProjectController::loopToTrack (int slot, double sourceBars)
+{
+    const int track = selectedTrack();
+    beginGesture ("Loop to track");
+    auto before = project_->slots[idx (slot)];
+    auto after = before;
+    after.sliceMode = SliceMode::Grid16;
+    after.sourceBars = sourceBars;
+    undo_.perform (new SlotAction (*this, slot, before, after));   // reslices into a new published sample
+    editTrack (track, [slot] (TrackSettings& t) {
+        t.sampleSlot = static_cast<int8_t> (slot);
+        t.fitToTempo = true;
+    });
+    editPattern ([] (Pattern& p) { p.loopSlot = -1; });
+    setStatus ("loop is now the sample of track " + juce::String (track + 1));
 }
 
 void ProjectController::pushMaster()
@@ -607,6 +820,13 @@ const WavePeaks* ProjectController::peaksForTrack (int track) const
     return &slots_[idx (slot)].peaks;
 }
 
+const WavePeaks* ProjectController::peaksForSlot (int slot) const
+{
+    if (slot < 0 || slot >= kNumSampleSlots || slots_[idx (slot)].live == nullptr)
+        return nullptr;
+    return &slots_[idx (slot)].peaks;
+}
+
 int ProjectController::numSlicesForTrack (int track) const
 {
     const int slot = project_->tracks[idx (track)].sampleSlot;
@@ -646,6 +866,7 @@ void ProjectController::pushAll()
     core.commands().push ({ CommandType::SetSeed, 0.f, static_cast<int32_t> (project_->seed) });
     core.commands().push ({ CommandType::QueuePattern, 0.f, project_->ui.currentPattern });
     pushMaster();
+    pushGuitar();
 
     for (int t = 0; t < kNumTracks; ++t)
         pushTrack (t);
@@ -770,19 +991,6 @@ void ProjectController::drainEngine()
 {
     auto& core = engine_.core();
 
-    Retired r;
-    while (core.retired().pop (r))
-    {
-        if (r.kind == Retired::Kind::Pattern)
-            delete static_cast<const Pattern*> (r.ptr);
-        else
-        {
-            for (auto& s : slots_)
-                if (s.live == r.ptr)
-                    s.live = nullptr;
-            delete static_cast<const Sample*> (r.ptr);
-        }
-    }
 
     EngineEvent e;
     const double now = juce::Time::getMillisecondCounterHiRes();
@@ -817,6 +1025,32 @@ void ProjectController::drainEngine()
 
             case EngineEventType::PadState:
                 break;
+
+            case EngineEventType::LoopRecorded: loops_.onRecorded (e.track); break;
+            case EngineEventType::LoopAborted:  loops_.onAborted (e.track); break;
+            case EngineEventType::CalibrationDone:
+                if (onCalibration)
+                    onCalibration (e.value != 0);
+                break;
+        }
+    }
+
+    // after the events: a loop that was just recorded must already be in the history when its predecessor comes back
+    Retired r;
+    while (core.retired().pop (r))
+    {
+        if (r.kind == Retired::Kind::Pattern)
+            delete static_cast<const Pattern*> (r.ptr);
+        else if (r.kind == Retired::Kind::Insert)
+            inserts_.onRetired (r.ptr);
+        else
+        {
+            for (auto& s : slots_)
+                if (s.live == r.ptr)
+                    s.live = nullptr;
+            const auto* smp = static_cast<const Sample*> (r.ptr);
+            if (! loops_.onRetired (smp))
+                delete smp;
         }
     }
 }
@@ -824,6 +1058,8 @@ void ProjectController::drainEngine()
 void ProjectController::timerCallback()
 {
     publishDirtyPatterns();
+    if (inserts_.pollChanged())
+        markDirty();
 
     if (++tick_ % 2 == 0)
     {
@@ -844,12 +1080,15 @@ void ProjectController::timerCallback()
 
 void ProjectController::takeProject (std::unique_ptr<Project> p, const juce::File& folder)
 {
+    loops_.reset();
+    inserts_.removeAll();
     project_ = std::move (p);
     folder_ = folder;
     undo_.clearUndoHistory();
     plockTarget_.reset();
     lastTouched_ = {};
     pushAll();
+    loadInserts();
     dirty_ = false;
     settings_.setLastProjectPath (folder_.getFullPathName());
     bump();
@@ -898,6 +1137,7 @@ bool ProjectController::save()
 {
     if (folder_ == juce::File())
         return false;
+    captureInsertStates();
     const auto r = files::writeProject (folder_, juce::String (toJson (*project_)));
     if (r.failed())
     {
@@ -920,9 +1160,9 @@ bool ProjectController::saveAs (const juce::File& target)
         return save();
 
     // carry imported samples along: the project folder must stay self-contained
-    const auto oldSamples = folder_.getChildFile ("samples");
-    if (oldSamples.isDirectory())
-        oldSamples.copyDirectoryTo (folder.getChildFile ("samples"));
+    for (const char* sub : { "samples", "loops" })
+        if (const auto old = folder_.getChildFile (sub); old.isDirectory())
+            old.copyDirectoryTo (folder.getChildFile (sub));
 
     folder_ = folder;
     project_->name = folder.getFileNameWithoutExtension().toStdString();

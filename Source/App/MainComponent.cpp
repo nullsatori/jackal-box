@@ -20,14 +20,22 @@ MainComponent::MainComponent (AudioEngine& e, AppSettings& s, ProjectController&
       trackHeaders (c),
       stepGrid (c),
       trackPanel (c),
+      guitarStrip (c, e, s),
       padBar (c),
       statusBar (c, e),
-      settingsOverlay (e, s)
+      settingsOverlay (e, s),
+      browser (c, s)
 {
     for (auto* comp : std::initializer_list<juce::Component*> { &transportBar, &patternStrip, &trackHeaders, &stepGrid,
-                                                                 &trackPanel, &padBar, &statusBar })
+                                                                 &trackPanel, &guitarStrip, &padBar, &statusBar })
         addAndMakeVisible (comp);
     addChildComponent (settingsOverlay);
+    addChildComponent (browser);
+
+    guitarStrip.onBrowse = [this] (int ch, int sl) { openBrowser (ch, sl); };
+    trackPanel.vst.onBrowse = [this] (int ch, int sl) { openBrowser (ch, sl); };
+    browser.onClosed = [this] { grabKeyboardFocus(); };
+    engine.updateLoopComp (settings);
 
     statusBar.onSettings = [this] { toggleSettings(); };
 
@@ -37,7 +45,7 @@ MainComponent::MainComponent (AudioEngine& e, AppSettings& s, ProjectController&
     engine.deviceManager().addChangeListener (this);
 
     setWantsKeyboardFocus (true);
-    setSize (1280, 760);
+    setSize (1280, 860);
 }
 
 MainComponent::~MainComponent()
@@ -50,14 +58,33 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster*)
     const auto state = engine.deviceManager().createStateXml();
     settings.setAudioDeviceState (state.get());
     settingsOverlay.refreshChannels();
+    engine.updateLoopComp (settings);
+    settingsOverlay.refreshTiming();
 }
 
 void MainComponent::toggleSettings()
 {
     if (! settingsOverlay.isVisible())
+    {
         settingsOverlay.refreshMidiDevices();
+        settingsOverlay.refreshTiming();
+        browser.setVisible (false);   // one overlay at a time
+    }
     settingsOverlay.setVisible (! settingsOverlay.isVisible());
     grabKeyboardFocus();
+}
+
+void MainComponent::openBrowser (int chain, int slot)
+{
+    settingsOverlay.setVisible (false);
+    controller.setLastInsert (chain, slot);
+    browser.openFor (chain, slot);
+}
+
+void MainComponent::browseFirstFree (int chain)
+{
+    const int slot = controller.insertSpec (chain, 0).empty() ? 0 : controller.insertSpec (chain, 1).empty() ? 1 : 0;
+    openBrowser (chain, slot);
 }
 
 // ---------------------------------------------------------------------------- commands
@@ -68,7 +95,8 @@ void MainComponent::getAllCommands (juce::Array<juce::CommandID>& ids)
     for (int i = 0; i < 16; ++i) ids.add (stepBase + i);
     for (int i = 0; i < 8; ++i) ids.addArray ({ hitBase + i, hitAccentBase + i, patternBase + i });
     ids.addArray ({ rowUp, rowDown, shiftLeft, shiftRight, nudgeLeft, nudgeRight, pageUp, pageDown, doubleLen, mutateCmd,
-                    undoCmd, redoCmd, redoAlt, saveCmd, saveAsCmd, openCmd, newCmd, closeOverlay, deletePLocks, nextTab });
+                    undoCmd, redoCmd, redoAlt, saveCmd, saveAsCmd, openCmd, newCmd, closeOverlay, deletePLocks, nextTab,
+                    loopEnter, loopRec, loopUndo, browseTrack, browseGuitar, toggleEditorCmd });
 }
 
 void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommandInfo& info)
@@ -117,6 +145,12 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case closeOverlay: return set ("Close overlay", KP::escapeKey, none);
         case deletePLocks: return set ("Delete p-locks", KP::deleteKey, none);
         case nextTab:      return set ("Next panel tab", KP::tabKey, none);
+        case loopEnter:    return set ("Loop REC / DUB / cancel", KP::returnKey, none);
+        case loopRec:      return set ("Loop REC (replace)", KP::returnKey, shift);
+        case loopUndo:     return set ("Loop UNDO", KP::backspaceKey, none);
+        case browseTrack:  return set ("Plugin for the track", 'P', ctrl);
+        case browseGuitar: return set ("Plugin for the guitar", 'P', ctrl | shift);
+        case toggleEditorCmd: return set ("Plugin editor", 'E', ctrl);
         default: break;
     }
 }
@@ -169,9 +203,27 @@ bool MainComponent::perform (const InvocationInfo& info)
         case openCmd:    openDialog(); return true;
         case newCmd:     controller.newProject(); return true;
         case closeOverlay:
-            if (settingsOverlay.isVisible())
+            if (controller.inserts().closeTopEditor())
+                return true;
+            if (settingsOverlay.calibrating())
+                settingsOverlay.cancelCalibration();
+            else if (browser.isVisible())
+                browser.close();
+            else if (settingsOverlay.isVisible())
                 toggleSettings();
             return true;
+        case loopEnter:  controller.loops().enter(); return true;
+        case loopRec:    controller.loops().busy() ? controller.loops().cancel() : controller.loops().rec (controller.loops().bars()); return true;
+        case loopUndo:   controller.loops().undo(); return true;
+        case browseTrack:  browseFirstFree (track); return true;
+        case browseGuitar: browseFirstFree (kGuitarChain); return true;
+        case toggleEditorCmd:
+        {
+            const auto [ch, sl] = controller.lastInsert();
+            if (ch >= 0)
+                controller.toggleEditor (ch, sl);
+            return true;
+        }
         case nextTab:
             controller.setTrackPanelTab (controller.trackPanelTab() + 1);
             return true;
@@ -305,13 +357,16 @@ void MainComponent::resized()
     patternStrip.setBounds (r.removeFromTop (40));
     statusBar.setBounds (r.removeFromBottom (28));
     padBar.setBounds (r.removeFromBottom (72));
+    const auto overlayArea = r;
+    guitarStrip.setBounds (r.removeFromBottom (96));
 
-    auto centre = r;
     trackHeaders.setBounds (r.removeFromLeft (180));
     trackPanel.setBounds (r.removeFromRight (300));
     stepGrid.setBounds (r.reduced (6, 0));
 
-    settingsOverlay.setBounds (centre.removeFromRight (520));
+    auto over = overlayArea;
+    settingsOverlay.setBounds (over.removeFromRight (520));
+    browser.setBounds (settingsOverlay.getBounds());
 }
 
 } // namespace jackal

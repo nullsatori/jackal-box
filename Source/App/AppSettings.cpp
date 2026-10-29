@@ -18,6 +18,10 @@ namespace keys
     const juce::String midiInputId = "midiInputId";
     const juce::String windowBounds = "windowBounds";
     const juce::String recentProjects = "recentProjects";
+    const juce::String vst3Paths = "vst3Paths";
+    const juce::String loopManualMs = "loopManualMs";
+    const juce::String loopUseMeasured = "loopUseMeasured";
+    const juce::String loopCalPrefix = "loopCal.";
 } // namespace keys
 
 AppSettings::AppSettings()
@@ -104,6 +108,29 @@ void AppSettings::setLastProjectPath (const juce::String& path)
     while (recent.size() > 8)
         recent.remove (recent.size() - 1);
     set (keys::recentProjects, recent.joinIntoString (";"));
+}
+
+juce::StringArray AppSettings::vst3Paths() const
+{
+    auto a = juce::StringArray::fromTokens (file().getValue (keys::vst3Paths), ";", "");
+    a.removeEmptyStrings();
+    return a;
+}
+
+void AppSettings::setVst3Paths (const juce::StringArray& paths) { set (keys::vst3Paths, paths.joinIntoString (";")); }
+double AppSettings::loopManualMs() const   { return juce::jlimit (-50.0, 50.0, file().getDoubleValue (keys::loopManualMs, 0.0)); }
+void AppSettings::setLoopManualMs (double v) { set (keys::loopManualMs, juce::jlimit (-50.0, 50.0, v)); }
+bool AppSettings::loopUseMeasured() const  { return file().getBoolValue (keys::loopUseMeasured, false); }
+void AppSettings::setLoopUseMeasured (bool v) { set (keys::loopUseMeasured, v); }
+
+int AppSettings::loopCal (const juce::String& deviceName) const
+{
+    return file().getIntValue (keys::loopCalPrefix + deviceName.retainCharacters ("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"), -1);
+}
+
+void AppSettings::setLoopCal (const juce::String& deviceName, int samples)
+{
+    set (keys::loopCalPrefix + deviceName.retainCharacters ("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"), samples);
 }
 
 void AppSettings::setMidiInputId (const juce::String& id)      { set (keys::midiInputId, id); }

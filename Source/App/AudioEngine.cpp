@@ -1,6 +1,9 @@
 #include "AudioEngine.h"
 
+#include "AppSettings.h"
+
 #include <chrono>
+#include <cmath>
 
 namespace jackal
 {
@@ -159,6 +162,22 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
                    device->getCurrentBufferSizeSamples(),
                    device->getActiveInputChannels().countNumberOfSetBits(),
                    device->getActiveOutputChannels().countNumberOfSetBits());
+}
+
+juce::String AudioEngine::deviceName() const
+{
+    auto* d = deviceManager_.getCurrentAudioDevice();
+    return d != nullptr ? d->getTypeName() + "-" + d->getName() : juce::String();
+}
+
+void AudioEngine::updateLoopComp (const AppSettings& settings)
+{
+    const auto info = latency();
+    const double sr = info.sampleRate > 0.0 ? info.sampleRate : 48000.0;
+    const int measured = settings.loopCal (deviceName());
+    const int base = settings.loopUseMeasured() && measured >= 0 ? measured : info.inputSamples + info.outputSamples;
+    const auto manual = static_cast<int> (std::llround (settings.loopManualMs() * sr / 1000.0));
+    core_.params().loopCompSamples.store (base + manual, std::memory_order_relaxed);
 }
 
 void AudioEngine::audioDeviceStopped()

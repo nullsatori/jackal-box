@@ -32,8 +32,8 @@ TransportBar::TransportBar (ProjectController& controller, EngineCore& c, AppSet
     swingLabel.setText ("SWING", juce::dontSendNotification);
     masterLabel.setText ("MASTER", juce::dontSendNotification);
     shakalLabel.setText ("SHAKAL", juce::dontSendNotification);
-    masterLabel.onClick = [this] { c_.setTrackPanelTab (3); };
-    shakalLabel.onClick = [this] { c_.setTrackPanelTab (3); };
+    masterLabel.onClick = [this] { c_.setTrackPanelTab (4); };   // MST
+    shakalLabel.onClick = [this] { c_.setTrackPanelTab (4); };   // MST
     masterLabel.setTooltip ("click: master tab");
     shakalLabel.setTooltip ("click: master tab");
     for (juce::Label* l : { &swingLabel, static_cast<juce::Label*> (&masterLabel), static_cast<juce::Label*> (&shakalLabel) })

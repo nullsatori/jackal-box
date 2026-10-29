@@ -2,7 +2,11 @@
 
 #include "AppSettings.h"
 #include "AudioEngine.h"
+#include "LoopController.h"
 #include "SampleLoader.h"
+#include "Plugins/InsertHost.h"
+#include "Plugins/PluginHost.h"
+#include "Plugins/PluginScanner.h"
 
 #include "Model/Project.h"
 
@@ -95,6 +99,35 @@ public:
     void applyMaster (const MasterState&);
     ShakalSnapshot shakalSnapshot() const { return engine_.core().shakalSnapshot(); }
 
+    // ---- guitar strip (stage 4), undoable like the SHAKAL knobs. Chain kGuitarChain in setFx/setShakal.
+    void setGuitarParam (GuitarParam p, float value);
+    const GuitarSettings& guitar() const noexcept { return project_->guitar; }
+    void applyGuitar (const GuitarSettings&);   // undo actions; inserts are kept as they are
+    LoopSnapshot loopSnapshot() const { return engine_.core().loopSnapshot(); }
+
+    // ---- VST3 inserts (stage 4). chain 0..7 track, kMasterChain, kGuitarChain. Not undoable.
+    const InsertSlotSpec& insertSpec (int chain, int slot) const;
+    juce::String loadPlugin (int chain, int slot, const juce::PluginDescription&);
+    void removePlugin (int chain, int slot);
+    void setInsertBypass (int chain, int slot, bool bypass);
+    void toggleEditor (int chain, int slot);
+    bool insertMissing (int chain, int slot) const;
+    int insertLatency (int chain, int slot) const;
+    void setLastInsert (int chain, int slot) { lastInsert_ = { chain, slot }; }
+    std::pair<int, int> lastInsert() const noexcept { return lastInsert_; }
+    PluginHost& plugins() noexcept { return plugins_; }
+    PluginScanner& scanner() noexcept { return scanner_; }
+    InsertHost& inserts() noexcept { return inserts_; }
+    LoopController& loops() noexcept { return loops_; }
+
+    // ---- used by LoopController (internal edits, no undo)
+    void setPatternLoopSlotRaw (int pattern, int slot);
+    void setSlotSpecRaw (int slot, const SampleSlotSpec& spec);
+    void adoptLoopSample (int slot, const Sample* s);   // the engine swapped it in (or an undo republished it)
+    void loopToTrack (int slot, double sourceBars);     // one undo transaction "Loop to track"
+    const Sample* liveSample (int slot) const { return slots_[static_cast<std::size_t> (slot)].live; }
+    double sampleRate() const;
+
     // ---- UI state, not undoable
     void setTrackPanelTab (int tab);
     int trackPanelTab() const noexcept { return project_->ui.trackPanelTab; }
@@ -123,6 +156,7 @@ public:
 
     // ---- samples, as the UI sees them
     const WavePeaks* peaksForTrack (int track) const;
+    const WavePeaks* peaksForSlot (int slot) const;
     int numSlicesForTrack (int track) const;
     std::vector<int64_t> sliceStartsForTrack (int track) const;
     bool trackSliced (int track) const { return numSlicesForTrack (track) > 0; }
@@ -132,6 +166,8 @@ public:
     bool openProject (const juce::File& folder);
     bool save();
     bool saveAs (const juce::File& folder);
+
+    std::function<void (bool ok)> onCalibration;   // CalibrationDone from the engine
 
     juce::String lastError() const noexcept { return lastError_; }
     void setStatus (const juce::String& text) { lastError_ = text; bump(); }
@@ -159,12 +195,15 @@ private:
     MasterState masterState() const;
     void editMaster (const std::function<void (MasterState&)>& fn);
     void pushAll();
+    void pushGuitar();
+    void loadInserts();
+    void captureInsertStates();
+    InsertSlotSpec& insertSpecRef (int chain, int slot);
     void reloadSlot (int slot);
     void reslice (int slot);
     void publishSample (int slot, std::unique_ptr<Sample> s);
     void onLoaded (LoadedSample&& r);
     void takeProject (std::unique_ptr<Project> p, const juce::File& folder);
-    double sampleRate() const;
     void bump() { ++version_; }
     void markDirty() { dirty_ = true; bump(); }
     int slotForImport (int track) const;
@@ -177,6 +216,11 @@ private:
     std::bitset<kNumPatterns> dirtyPatterns_;
     std::array<SlotRuntime, kNumSampleSlots> slots_ {};
     std::unique_ptr<SampleLoader> loader_;
+    PluginHost plugins_;
+    PluginScanner scanner_;
+    InsertHost inserts_;
+    LoopController loops_;
+    std::pair<int, int> lastInsert_ { -1, -1 };
 
     SequencerSnapshot snap_ {};
     std::array<double, kNumTracks> hitTime_ {};

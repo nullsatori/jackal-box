@@ -164,7 +164,18 @@ if(JACKAL_BUILD_APP)
         Source/App/GlitchPadBar.cpp
         Source/App/StatusBar.cpp
         Source/App/SettingsOverlay.cpp
-        Source/App/ShakalSection.cpp)
+        Source/App/ShakalSection.cpp
+        Source/App/InsertsTab.cpp
+        Source/App/GuitarStripPanel.cpp
+        Source/App/LoopController.cpp
+        Source/App/Plugins/PluginHost.cpp
+        Source/App/Plugins/PluginScanner.cpp
+        Source/App/Plugins/ScanWorker.cpp
+        Source/App/Plugins/Vst3Insert.cpp
+        Source/App/Plugins/PluginWindow.cpp
+        Source/App/Plugins/PluginBrowserOverlay.cpp
+        Source/App/Plugins/InsertSlotButton.cpp
+        Source/App/Plugins/InsertHost.cpp)
 
     target_compile_definitions(JackalBox PRIVATE
         JUCE_WEB_BROWSER=0
@@ -172,7 +183,12 @@ if(JACKAL_BUILD_APP)
         JUCE_APPLICATION_NAME_STRING="JackalBox"
         JUCE_APPLICATION_VERSION_STRING="${PROJECT_VERSION}"
         JUCE_WASAPI=1
-        JUCE_DIRECTSOUND=1)
+        JUCE_DIRECTSOUND=1
+        JUCE_PLUGINHOST_VST3=1
+        JUCE_PLUGINHOST_VST=0
+        JUCE_PLUGINHOST_AU=0
+        JUCE_PLUGINHOST_LADSPA=0
+        JUCE_PLUGINHOST_LV2=0)
 
     jackal_configure_asio(JackalBox)
 
@@ -182,6 +198,7 @@ if(JACKAL_BUILD_APP)
             jackal_model
             juce::juce_audio_devices
             juce::juce_audio_formats
+            juce::juce_audio_processors
             juce::juce_audio_utils
             juce::juce_gui_extra
         PUBLIC

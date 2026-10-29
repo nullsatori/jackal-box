@@ -7,7 +7,7 @@
 namespace jackal
 {
 
-// Driver-reported latency. Loopback calibration comes in stage 4.
+// Driver-reported latency plus the loop compensation the engine uses (stage 4).
 class LatencyDisplay : public juce::Component, private juce::Timer
 {
 public:

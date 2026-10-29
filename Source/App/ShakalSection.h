@@ -13,11 +13,12 @@ namespace jackal
 {
 
 // The big SHAKAL macro knob with its scale, plus the six effects of the chain (manual layer).
-// One instance follows the selected track (FX tab), another the master (MST tab).
+// One instance follows the selected track (FX tab), others the master (MST) and the guitar (GTR).
 class ShakalSection : public juce::Component, private juce::Timer
 {
 public:
-    ShakalSection (ProjectController& controller, bool master);
+    // fixedChain: -1 follows the selected track, kMasterChain or kGuitarChain otherwise
+    ShakalSection (ProjectController& controller, int fixedChain);
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -54,7 +55,8 @@ private:
     void setupRow (Row& row);
 
     ProjectController& c_;
-    const bool master_;
+    const int fixed_;
+    bool fixed() const noexcept { return fixed_ >= 0; }
     juce::Label title;
     std::array<juce::TextButton, 3> presets { juce::TextButton ("IRON"), juce::TextButton ("NET"), juce::TextButton ("MEM") };
     juce::TextButton bypass { "BYP" }, reroll { "RR" };

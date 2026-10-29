@@ -3,6 +3,7 @@
 #include "JackalLookAndFeel.h"
 #include "MainComponent.h"
 #include "ProjectController.h"
+#include "Plugins/ScanWorker.h"
 
 #include <juce_gui_extra/juce_gui_extra.h>
 
@@ -18,7 +19,7 @@ public:
         setUsingNativeTitleBar (true);
         setContentOwned (content, true);
         setResizable (true, true);
-        setResizeLimits (1100, 680, 4096, 4096);
+        setResizeLimits (1100, 760, 4096, 4096);
 
         const auto saved = settings.windowBounds();
         if (saved.isNotEmpty())
@@ -51,10 +52,14 @@ class JackalBoxApplication : public juce::JUCEApplication
 public:
     const juce::String getApplicationName() override { return JUCE_APPLICATION_NAME_STRING; }
     const juce::String getApplicationVersion() override { return JUCE_APPLICATION_VERSION_STRING; }
-    bool moreThanOneInstanceAllowed() override { return false; }
+    // the plugin scan child is this same executable
+    bool moreThanOneInstanceAllowed() override { return scanworker::isWorkerCommandLine (getCommandLineParameters()); }
 
-    void initialise (const juce::String&) override
+    void initialise (const juce::String& commandLine) override
     {
+        if (scanworker::tryRun (commandLine))
+            return;   // scan child: no window, no audio, no project
+
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
 
         settings = std::make_unique<AppSettings>();

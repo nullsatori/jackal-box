@@ -32,10 +32,10 @@ void ShakalSection::MacroKnob::mouseWheelMove (const juce::MouseEvent&, const ju
     setValue (juce::jlimit (0.0, 1.0, getValue() + d), juce::sendNotificationSync);
 }
 
-ShakalSection::ShakalSection (ProjectController& controller, bool master)
-    : c_ (controller), master_ (master), macro (controller, "SHAKAL")
+ShakalSection::ShakalSection (ProjectController& controller, int fixedChain)
+    : c_ (controller), fixed_ (fixedChain), macro (controller, "SHAKAL")
 {
-    title.setText (master ? "MASTER SHAKAL" : "SHAKAL", juce::dontSendNotification);
+    title.setText (fixedChain == kMasterChain ? "MASTER SHAKAL" : fixedChain == kGuitarChain ? "GUITAR SHAKAL" : "SHAKAL", juce::dontSendNotification);
     title.setFont (monoFont (13.f, true));
     title.setColour (juce::Label::textColourId, palette::neonCyan);
     addAndMakeVisible (title);
@@ -164,7 +164,7 @@ void ShakalSection::setupRow (Row& row)
 
 int ShakalSection::chain() const
 {
-    return master_ ? kMasterChain : c_.selectedTrack();
+    return fixed() ? fixed_ : c_.selectedTrack();
 }
 
 void ShakalSection::timerCallback()
@@ -210,7 +210,7 @@ void ShakalSection::refresh()
     // a held step shows (and edits) its SHAKAL p-lock
     float value = c_.shakalValue (ch);
     bool held = false;
-    if (! master_)
+    if (! fixed())
         if (const auto hold = c_.plockTarget(); hold && hold->track == ch)
         {
             held = true;
@@ -263,7 +263,7 @@ void ShakalSection::resized()
 {
     auto r = getLocalBounds().reduced (6, 4);
     auto head = r.removeFromTop (24);
-    title.setBounds (head.removeFromLeft (master_ ? 104 : 64));
+    title.setBounds (head.removeFromLeft (fixed() ? 104 : 64));
     for (auto& b : presets)
     {
         b.setBounds (head.removeFromLeft (40).reduced (1));

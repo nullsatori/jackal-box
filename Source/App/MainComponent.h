@@ -3,6 +3,8 @@
 #include "AppSettings.h"
 #include "AudioEngine.h"
 #include "GlitchPadBar.h"
+#include "GuitarStripPanel.h"
+#include "Plugins/PluginBrowserOverlay.h"
 #include "PatternStrip.h"
 #include "ProjectController.h"
 #include "SettingsOverlay.h"
@@ -46,6 +48,8 @@ public:
 private:
     void changeListenerCallback (juce::ChangeBroadcaster* source) override;
     void toggleSettings();
+    void openBrowser (int chain, int slot);
+    void browseFirstFree (int chain);
     void openDialog();
     void saveAsDialog();
 
@@ -59,9 +63,11 @@ private:
     TrackHeaders trackHeaders;
     StepGrid stepGrid;
     TrackPanel trackPanel;
+    GuitarStripPanel guitarStrip;
     GlitchPadBar padBar;
     StatusBar statusBar;
     SettingsOverlay settingsOverlay;
+    PluginBrowserOverlay browser;
 
     std::unique_ptr<juce::FileChooser> chooser;
     bool fillKeyDown = false;
