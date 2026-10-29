@@ -2,6 +2,7 @@
 
 #include "Engine/ParamIds.h"
 #include "Engine/PatternData.h"
+#include "Engine/SongData.h"
 
 #include <array>
 #include <cstdint>
@@ -21,6 +22,7 @@ struct SampleSlotSpec
     double sourceBars = 0.0;                   // 0 = not a loop
     std::vector<int64_t> transientBoundaries;  // only for Transient
     bool used = false;
+    std::string origin;                        // stage 5: absolute path of the imported file, empty for builtin/loop
     bool operator== (const SampleSlotSpec&) const = default;
 };
 
@@ -78,7 +80,21 @@ struct UiState
     int gridPage = 0;
     float mutationStrength = 0.5f;
     int trackPanelTab = 0;   // 0 SRC, 1 FX, 2 VST, 3 STEP, 4 MST, 5 GTR (stage 4)
+    bool songMode = false;   // stage 5
+    bool follow = true;
+    int songCursor = 0;      // not serialized
     bool operator== (const UiState&) const = default;
+};
+
+// Stage 5: export settings, kept with the project.
+struct ExportSettings
+{
+    int sampleRate = 0;          // 0 = device rate; else 44100 | 48000 | 96000
+    int bitDepth = 24;           // 16 | 24 | 32 (32 = IEEE float)
+    bool stems = true;
+    float tailSeconds = 2.f;     // 0..8
+    int cycles = 4;              // 1..16, for a pattern export
+    bool operator== (const ExportSettings&) const = default;
 };
 
 struct Project
@@ -95,6 +111,8 @@ struct Project
     std::array<TrackSettings, kNumTracks> tracks {};
     std::array<Pattern, kNumPatterns> patterns {};
     UiState ui {};
+    SongData song {};                  // stage 5
+    ExportSettings exportSettings {};
     bool operator== (const Project&) const = default;
 };
 

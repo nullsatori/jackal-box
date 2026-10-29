@@ -31,7 +31,9 @@ add_executable(jackal_tests
     GuitarStripTests.cpp
     SongTests.cpp
     CaptureTests.cpp
-    MidiMapTests.cpp)
+    MidiMapTests.cpp
+    WavFileTests.cpp
+    RenderTests.cpp)
 
 target_link_libraries(jackal_tests PRIVATE jackal_engine jackal_model Catch2::Catch2WithMain)
 

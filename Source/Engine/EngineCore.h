@@ -55,6 +55,8 @@ public:
     LoopSnapshot loopSnapshot() const noexcept;
     InsertChain& insertChain (int chain) noexcept { return inserts_[static_cast<std::size_t> (chain)]; }
     const SampleBank& bank() const noexcept { return bank_; }   // tests read slots; the app never does
+    int maxBlockSize() const noexcept { return maxBlock_; }
+    double sampleRate() const noexcept { return transport_.sampleRate(); }
 
     // stage 5: buses of the last processBlock (after 7c) and the guitar strip output; valid until the next process().
     // Read only by the thread that calls process().

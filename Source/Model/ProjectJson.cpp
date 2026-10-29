@@ -337,6 +337,8 @@ std::string toJson (const Project& p)
             o["sourceBars"] = s.sourceBars;
             if (s.sliceMode == SliceMode::Transient)
                 o["boundaries"] = s.transientBoundaries;
+            if (! s.origin.empty())
+                o["origin"] = s.origin;
         }
         slots.push_back (std::move (o));
     }
@@ -383,7 +385,18 @@ std::string toJson (const Project& p)
 
     j["ui"] = { { "selectedTrack", p.ui.selectedTrack }, { "currentPattern", p.ui.currentPattern },
                 { "gridPage", p.ui.gridPage }, { "mutationStrength", p.ui.mutationStrength },
-                { "trackPanelTab", p.ui.trackPanelTab } };
+                { "trackPanelTab", p.ui.trackPanelTab }, { "songMode", p.ui.songMode }, { "follow", p.ui.follow } };
+
+    Json entries = Json::array();
+    for (int i = 0; i < std::min<int> (p.song.length, kMaxSongEntries); ++i)
+    {
+        const auto& e = p.song.entries[static_cast<std::size_t> (i)];
+        entries.push_back ({ { "p", e.pattern }, { "n", e.repeats } });
+    }
+    j["song"] = { { "loop", p.song.loop }, { "entries", std::move (entries) } };
+    const auto& x = p.exportSettings;
+    j["export"] = { { "sampleRate", x.sampleRate }, { "bitDepth", x.bitDepth }, { "stems", x.stems },
+                    { "tailSeconds", x.tailSeconds }, { "cycles", x.cycles } };
 
     return j.dump (1);
 }
@@ -460,6 +473,8 @@ ParseResult fromJson (std::string_view text)
                 for (const auto& v : *b)
                     if (v.is_number_integer() && s.transientBoundaries.size() < 65)
                         s.transientBoundaries.push_back (std::max<int64_t> (0, v.get<int64_t>()));
+            if (version >= 5)
+                s.origin = str (o, "origin", "");
         }
     }
 
@@ -558,6 +573,45 @@ ParseResult fromJson (std::string_view text)
         p->ui.trackPanelTab = num<int> (*ui, "trackPanelTab", 0, 0, 5);
         if (version < 4)   // v3 tabs SRC FX STEP MST; v4 inserts VST after FX and adds GTR
             p->ui.trackPanelTab = std::array<int, 6> { 0, 1, 3, 4, 4, 4 }[static_cast<std::size_t> (std::clamp (p->ui.trackPanelTab, 0, 3))];
+        if (version >= 5)
+        {
+            p->ui.songMode = flag (*ui, "songMode", false);
+            p->ui.follow = flag (*ui, "follow", true);
+        }
+    }
+
+    if (version >= 5)
+    {
+        if (const Json* song = obj (j, "song"))
+        {
+            p->song.loop = flag (*song, "loop", true);
+            if (const Json* entries = arr (*song, "entries"))
+                for (const auto& e : *entries)
+                {
+                    if (p->song.length >= kMaxSongEntries)
+                        break;
+                    if (! e.is_object())
+                        continue;
+                    const auto pit = e.find ("p");
+                    if (pit == e.end() || ! pit->is_number_integer())
+                        continue;
+                    const int64_t pat = pit->get<int64_t>();
+                    if (pat < 0 || pat >= kNumPatterns)
+                        continue;   // skipped, not clamped: a foreign pattern is worse than a shorter song
+                    p->song.entries[p->song.length++] = { static_cast<int8_t> (pat), num<uint8_t> (e, "n", 1, 1, kMaxRepeats) };
+                }
+        }
+        if (const Json* x = obj (j, "export"))
+        {
+            auto& es = p->exportSettings;
+            const int sr = num<int> (*x, "sampleRate", 0, 0, 1000000);
+            es.sampleRate = (sr == 44100 || sr == 48000 || sr == 96000) ? sr : 0;
+            const int bits = num<int> (*x, "bitDepth", 24, 0, 1000);
+            es.bitDepth = (bits == 16 || bits == 24 || bits == 32) ? bits : 24;
+            es.stems = flag (*x, "stems", true);
+            es.tailSeconds = num<float> (*x, "tailSeconds", 2.f, 0.f, 8.f);
+            es.cycles = num<int> (*x, "cycles", 4, 1, 16);
+        }
     }
 
     result.ok = true;

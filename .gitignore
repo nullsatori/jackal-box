@@ -24,3 +24,8 @@ ThirdParty/ASIOSDK*/
 # Local junk
 _Local/
 *.log
+
+# Exports and audio never go into git (tests write only to a temp folder)
+*.wav
+*.aif
+*.aiff

@@ -111,7 +111,22 @@ add_library(jackal_model STATIC
     Source/Model/DemoKit.h
     Source/Model/DemoKit.cpp
     Source/Model/Slicer.h
-    Source/Model/Slicer.cpp)
+    Source/Model/Slicer.cpp
+    Source/Model/ParamSpec.cpp
+    Source/Model/SongOps.h
+    Source/Model/SongOps.cpp
+    Source/Model/WavFile.h
+    Source/Model/WavFile.cpp
+    Source/Model/ProjectPublisher.h
+    Source/Model/ProjectPublisher.cpp
+    Source/Model/OfflineRender.h
+    Source/Model/OfflineRender.cpp
+    Source/Model/MidiMap.h
+    Source/Model/MidiMap.cpp
+    Source/Model/MidiMapJson.h
+    Source/Model/MidiMapJson.cpp
+    Source/Model/MidiDispatcher.h
+    Source/Model/MidiDispatcher.cpp)
 
 target_link_libraries(jackal_model PUBLIC jackal_engine)
 # nlohmann as a SYSTEM include so its warnings never break -Werror

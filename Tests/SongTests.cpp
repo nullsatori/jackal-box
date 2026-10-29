@@ -396,3 +396,49 @@ TEST_CASE ("SG5: edits during the song", "[song]")
         ref = rig.left;
     }
 }
+
+#include "Model/SongOps.h"
+
+TEST_CASE ("SG6: song operations", "[song][model]")
+{
+    SongData s;
+    for (int i = 0; i < kMaxSongEntries; ++i)
+        REQUIRE (songops::append (s, i % 8, 1));
+    REQUIRE (! songops::append (s, 0));
+    REQUIRE (s.length == 32);
+
+    SongData t = songOf ({ { 0, 1 }, { 1, 1 }, { 2, 1 } });
+    songops::move (t, 0, 2);   // A goes before C
+    REQUIRE (t.entries[0].pattern == 1);
+    REQUIRE (t.entries[1].pattern == 0);
+    REQUIRE (t.entries[2].pattern == 2);
+    songops::remove (t, 1);
+    REQUIRE (t.length == 2);
+    REQUIRE (t.entries[0].pattern == 1);
+    REQUIRE (t.entries[1].pattern == 2);
+    songops::setRepeats (t, 0, 0);
+    REQUIRE (t.entries[0].repeats == 1);
+    songops::setRepeats (t, 0, 40);
+    REQUIRE (t.entries[0].repeats == 16);
+    songops::setPattern (t, 1, 12);
+    REQUIRE (t.entries[1].pattern == 7);
+    songops::setPattern (t, 1, -3);
+    REQUIRE (t.entries[1].pattern == 0);
+    REQUIRE (songops::insert (t, 0, 5, 2));
+    REQUIRE (t.entries[0] == SongEntry { 5, 2 });
+    REQUIRE (t.length == 3);
+
+    std::array<Pattern, kNumPatterns> pats {};
+    pats[0].bars = 1;
+    pats[1].bars = 2;
+    pats[2].bars = 4;
+    REQUIRE (songops::totalBeats (songOf ({ { 0, 2 }, { 1, 1 }, { 2, 3 } }), pats) == 2 * 4 + 8 + 3 * 16);
+
+    REQUIRE (! songops::playable (SongData {}));
+    SongData bad = songOf ({ { 0, 1 }, { 1, 1 } });
+    bad.entries[1].pattern = -1;
+    REQUIRE (! songops::playable (bad));
+    REQUIRE (songops::playable (songOf ({ { 0, 1 } })));
+    songops::clear (bad);
+    REQUIRE (bad.length == 0);
+}

@@ -5,13 +5,22 @@
 
 #include "Engine/EngineCore.h"
 #include "Model/DemoKit.h"
+#include "Model/OfflineRender.h"
+#include "Model/ProjectPublisher.h"
 #include "Model/Project.h"
 #include "Model/Slicer.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
+#include <string>
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 #include <initializer_list>
 #include <memory>
 #include <set>
@@ -189,34 +198,28 @@ struct OfflineRig
 
     void renderSeconds (double s) { renderUntil (position() + static_cast<int64_t> (std::llround (s * sampleRate))); }
 
-    // Same path as ProjectController::loadProject, minus files.
-    void loadProject (Project& p)
+    // Same path as ProjectController::loadProject, minus files (stage 5: through publishProject).
+    void loadProject (Project& p, const PublishedInserts& inserts = {})
     {
+        publishProject (core, p, builtinSamples (p, sampleRate), inserts);
+    }
+
+    static std::array<Sample*, kNumSampleSlots> builtinSamples (const Project& p, double sr)
+    {
+        std::array<Sample*, kNumSampleSlots> out {};
         for (int s = 0; s < kNumSampleSlots; ++s)
         {
-            auto& spec = p.slots[static_cast<std::size_t> (s)];
+            const auto& spec = p.slots[static_cast<std::size_t> (s)];
             if (! spec.used || spec.source.rfind ("builtin:", 0) != 0)
                 continue;
-            auto sample = makeBuiltin (spec.source.substr (8), sampleRate);
+            auto sample = makeBuiltin (spec.source.substr (8), sr);
             if (sample == nullptr)
                 continue;
-            applySlicing (*sample, spec);
-            setSample (s, sample.release());
+            auto specCopy = spec;
+            applySlicing (*sample, specCopy);
+            out[static_cast<std::size_t> (s)] = sample.release();
         }
-        for (int t = 0; t < kNumTracks; ++t)
-        {
-            const auto& tr = p.tracks[static_cast<std::size_t> (t)];
-            setTrack (t, tr.sampleSlot, tr.chokeGroup, tr.fitToTempo);
-            for (int k = 0; k < kNumTrackParams; ++k)
-                param (t, static_cast<TrackParam> (k), tr.params[static_cast<std::size_t> (k)]);
-            core.params().trackMute[static_cast<std::size_t> (t)] = tr.mute;
-            core.params().trackSolo[static_cast<std::size_t> (t)] = tr.solo;
-        }
-        masterGainDb (p.masterGainDb);
-        cmd (CommandType::SetSeed, static_cast<int32_t> (p.seed));
-        bpm (p.bpm);
-        for (int i = 0; i < kNumPatterns; ++i)
-            setPattern (i, p.patterns[static_cast<std::size_t> (i)]);
+        return out;
     }
 };
 
@@ -228,6 +231,47 @@ inline SongData songOf (std::initializer_list<std::pair<int, int>> entries, bool
         s.entries[s.length++] = { static_cast<int8_t> (p), static_cast<uint8_t> (n) };
     return s;
 }
+
+// EngineCore + publishProject + renderOffline. Samples and inserts pass to the engine; inserts come back in result.
+struct RenderRun
+{
+    RenderBuffers buffers;
+    jackal::RenderResult result;
+};
+
+inline RenderRun renderToBuffers (const Project& p, RenderOptions options, int blockSize, std::array<Sample*, kNumSampleSlots> samples,
+                                  const PublishedInserts& inserts = {}, RenderProgress* progress = nullptr, double sr = 48000.0)
+{
+    RenderRun run;
+    EngineCore core;
+    core.prepare (sr, blockSize, 0, 2);
+    publishProject (core, p, samples, inserts);
+    options.blockSize = blockSize;
+    run.result = renderOffline (core, p, options, run.buffers, progress);
+    return run;
+}
+
+// Unique temp folder, removed with everything in it when the helper goes away. Tests write WAVs only here.
+struct TempDir
+{
+    std::filesystem::path path;
+    TempDir()
+    {
+        static int counter = 0;
+#ifdef _WIN32
+        const long pid = static_cast<long> (_getpid());
+#else
+        const long pid = static_cast<long> (getpid());
+#endif
+        path = std::filesystem::temp_directory_path() / ("jackal-tests-" + std::to_string (pid) + "-" + std::to_string (++counter));
+        std::filesystem::create_directories (path);
+    }
+    ~TempDir()
+    {
+        std::error_code ec;
+        std::filesystem::remove_all (path, ec);
+    }
+};
 
 // A pattern on the heap with one lane filled.
 inline std::unique_ptr<Pattern> laneAll (int lane, int length = 16, LaneSpeed speed = LaneSpeed::Normal)

@@ -16,9 +16,9 @@ namespace
         p->bpm = 166.5;
         p->seed = 0xDEADBEEF;
         p->masterGainDb = -3.25f;
-        p->slots[0] = { "builtin:kick", "", SliceMode::Off, 0.0, {}, true };
-        p->slots[3] = { "file", "samples/riff.wav", SliceMode::Transient, 1.0, { 0, 4410, 9200 }, true };
-        p->slots[9] = { "file", "samples/amen.wav", SliceMode::Grid32, 2.0, {}, true };
+        p->slots[0] = { "builtin:kick", "", SliceMode::Off, 0.0, {}, true, {} };
+        p->slots[3] = { "file", "samples/riff.wav", SliceMode::Transient, 1.0, { 0, 4410, 9200 }, true, {} };
+        p->slots[9] = { "file", "samples/amen.wav", SliceMode::Grid32, 2.0, {}, true, {} };
 
         for (int t = 0; t < kNumTracks; ++t)
         {
@@ -94,9 +94,9 @@ TEST_CASE ("J2: tolerant reading, strict format checks", "[json]")
     REQUIRE (ok.project->patterns[0].lanes[0].steps[3].velocity == 127);
     REQUIRE (ok.project->patterns[0].lanes[0].length == 16);
 
-    // stage 4: version 4 is current, version 5 is the first unknown one
-    REQUIRE (fromJson (R"({"format":"jackal-project","version":4})").ok);
-    auto v4 = fromJson (R"({"format":"jackal-project","version":5})");
+    // stage 5: version 5 is current, version 6 is the first unknown one
+    REQUIRE (fromJson (R"({"format":"jackal-project","version":5})").ok);
+    auto v4 = fromJson (R"({"format":"jackal-project","version":6})");
     REQUIRE (! v4.ok);
     REQUIRE (! v4.error.empty());
     REQUIRE (! fromJson (R"({"format":"other","version":2})").ok);
@@ -122,7 +122,7 @@ TEST_CASE ("J3: version 2 migrates to the current version", "[json]")
     REQUIRE (r.project->tracks[0].params[0] == -2.f);
 
     const auto text = toJson (*r.project);
-    REQUIRE (text.find ("\"version\": 4") != std::string::npos);
+    REQUIRE (text.find ("\"version\": 5") != std::string::npos);
     auto again = fromJson (text);
     REQUIRE (again.ok);
     REQUIRE (again.migratedFrom == 0);
@@ -172,7 +172,7 @@ TEST_CASE ("J4: version 3 SHAKAL settings roundtrip", "[json]")
     REQUIRE (odd.project->tracks[0].fx.params[static_cast<std::size_t> (FxParam::CrushBits)] == 16.f);
     REQUIRE (odd.project->tracks[0].fx.params[static_cast<std::size_t> (FxParam::DriveMode)] == 0.f);
 
-    REQUIRE (! fromJson (R"({"format":"jackal-project","version":5})").ok);   // stage 4: 4 reads, 5 is unknown
+    REQUIRE (! fromJson (R"({"format":"jackal-project","version":6})").ok);   // stage 5: 4 and 5 read, 6 is unknown
     REQUIRE (fromJson (R"({"format":"jackal-project","version":4})").ok);
 
     auto bare = fromJson (R"({"format":"jackal-project","version":3,"tracks":[{"name":"X"}]})");
@@ -203,7 +203,7 @@ TEST_CASE ("J5: versions 2 and 3 migrate to version 4", "[json]")
             REQUIRE (r.project->ui.trackPanelTab == 3);   // STEP moved behind VST
 
         const auto out = toJson (*r.project);
-        REQUIRE (out.find ("\"version\": 4") != std::string::npos);
+        REQUIRE (out.find ("\"version\": 5") != std::string::npos);
         auto again = fromJson (out);
         REQUIRE (again.ok);
         REQUIRE (again.migratedFrom == 0);
@@ -233,8 +233,8 @@ TEST_CASE ("J6: version 4 round trip", "[json]")
     p->guitar.loopGainDb = -3.f;
     p->guitar.inserts[0] = slot (60, false);
     p->guitar.inserts[1] = slot (61, true);
-    p->slots[8] = { "loop", "loops/8-3.wav", SliceMode::Off, 1.0, {}, true };
-    p->slots[9] = { "loop", "loops/9-1.wav", SliceMode::Grid16, 2.0, {}, true };
+    p->slots[8] = { "loop", "loops/8-3.wav", SliceMode::Off, 1.0, {}, true, {} };
+    p->slots[9] = { "loop", "loops/9-1.wav", SliceMode::Grid16, 2.0, {}, true, {} };
     p->patterns[0].loopSlot = 8;
     p->patterns[1].loopSlot = 9;
 
@@ -263,11 +263,112 @@ TEST_CASE ("J6: version 4 round trip", "[json]")
     REQUIRE (odd.project->masterInserts[0].empty());
     REQUIRE (odd.project->masterInserts[1].name == "X");
 
-    auto v5 = fromJson (R"({"format":"jackal-project","version":5})");
+    // stage 5 (sanctioned change of J6): version 6 is the error, version 5 reads
+    REQUIRE (fromJson (R"({"format":"jackal-project","version":5})").ok);
+    auto v5 = fromJson (R"({"format":"jackal-project","version":6})");
     REQUIRE (! v5.ok);
-    REQUIRE (v5.error.find ("5") != std::string::npos);
+    REQUIRE (v5.error.find ("6") != std::string::npos);
 
     auto noGuitar = fromJson (R"({"format":"jackal-project","version":4})");
     REQUIRE (noGuitar.ok);
     REQUIRE (noGuitar.project->guitar == GuitarSettings {});
+}
+
+// ---------------------------------------------------------------- stage 5
+
+#include "Engine/SongData.h"
+
+#include <string>
+
+TEST_CASE ("J7: versions 2 to 4 migrate to version 5", "[json]")
+{
+    // a version 4 literal: the current writer's output with the stage 5 fields ignored by a v4 reader
+    auto v5 = everything();
+    v5->song.length = 1;
+    v5->song.entries[0] = { 1, 3 };
+    v5->slots[3].origin = "D:/breaks/riff.wav";
+    std::string text = toJson (*v5);
+    const auto pos = text.find ("\"version\": 5");
+    REQUIRE (pos != std::string::npos);
+    text.replace (pos, 12, "\"version\": 4");
+
+    auto r = fromJson (text);
+    REQUIRE (r.ok);
+    REQUIRE (r.migratedFrom == 4);
+    REQUIRE (r.project->song.length == 0);
+    REQUIRE (r.project->song.loop);
+    REQUIRE (r.project->exportSettings == ExportSettings {});
+    REQUIRE (! r.project->ui.songMode);
+    REQUIRE (r.project->ui.follow);
+    for (const auto& s : r.project->slots)
+        REQUIRE (s.origin.empty());
+    const auto out = toJson (*r.project);
+    REQUIRE (out.find ("\"version\": 5") != std::string::npos);
+    auto again = fromJson (out);
+    REQUIRE (again.ok);
+    REQUIRE (again.migratedFrom == 0);
+    REQUIRE (*again.project == *r.project);
+
+    for (int v : { 2, 3 })
+    {
+        auto old = fromJson ("{\"format\":\"jackal-project\",\"version\":" + std::to_string (v) + "}");
+        REQUIRE (old.ok);
+        REQUIRE (old.migratedFrom == v);
+        REQUIRE (old.project->song.length == 0);
+        REQUIRE (old.project->ui.follow);
+        REQUIRE (old.project->exportSettings == ExportSettings {});
+    }
+}
+
+TEST_CASE ("J8: version 5 round trip and tolerance", "[json]")
+{
+    auto p = everything();
+    p->song.loop = false;
+    p->song.length = 32;
+    for (int i = 0; i < 32; ++i)
+        p->song.entries[static_cast<std::size_t> (i)] = { static_cast<int8_t> (i % 8), static_cast<uint8_t> (i % 16 + 1) };
+    p->exportSettings = { 96000, 32, false, 4.5f, 7 };
+    p->slots[3].origin = "D:/breaks/riff.wav";
+    p->slots[9].origin = "C:/samples/amen.wav";
+    p->ui.songMode = true;
+    p->ui.follow = false;
+
+    const auto text = toJson (*p);
+    auto r = fromJson (text);
+    REQUIRE (r.ok);
+    REQUIRE (r.migratedFrom == 0);
+    REQUIRE (*r.project == *p);
+    REQUIRE (toJson (*r.project) == text);
+
+    std::string entries;
+    for (int i = 0; i < 33; ++i)
+        entries += std::string (i ? "," : "") + "{\"p\":" + std::to_string (i % 8) + ",\"n\":2}";
+    auto many = fromJson ("{\"format\":\"jackal-project\",\"version\":5,\"song\":{\"entries\":[" + entries + "]}}");
+    REQUIRE (many.ok);
+    REQUIRE (many.project->song.length == 32);
+
+    auto odd = fromJson (R"({"format":"jackal-project","version":5,
+        "song":{"loop":false,"entries":[{"p":0,"n":1},{"p":9,"n":1},{"p":1,"n":0},{"p":2,"n":40}]},
+        "export":{"sampleRate":22050,"bitDepth":20,"stems":false,"tailSeconds":99,"cycles":0}})");
+    REQUIRE (odd.ok);
+    const auto& s = odd.project->song;
+    REQUIRE (! s.loop);
+    REQUIRE (s.length == 3);   // "p": 9 skipped
+    REQUIRE (s.entries[0] == SongEntry { 0, 1 });
+    REQUIRE (s.entries[1] == SongEntry { 1, 1 });
+    REQUIRE (s.entries[2] == SongEntry { 2, 16 });
+    const auto& x = odd.project->exportSettings;
+    REQUIRE (x.sampleRate == 0);
+    REQUIRE (x.bitDepth == 24);
+    REQUIRE (! x.stems);
+    REQUIRE (x.tailSeconds == 8.f);
+    REQUIRE (x.cycles == 1);
+
+    auto v6 = fromJson (R"({"format":"jackal-project","version":6})");
+    REQUIRE (! v6.ok);
+    REQUIRE (! v6.error.empty());
+    auto bare = fromJson (R"({"format":"jackal-project","version":5})");
+    REQUIRE (bare.ok);
+    REQUIRE (bare.project->song == SongData {});
+    REQUIRE (bare.project->exportSettings == ExportSettings {});
 }

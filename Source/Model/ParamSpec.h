@@ -1,9 +1,13 @@
 #pragma once
 
 #include "Engine/ParamIds.h"
+#include "Engine/PatternData.h"
 
 #include <algorithm>
 #include <array>
+#include <optional>
+#include <span>
+#include <string>
 #include <string_view>
 
 namespace jackal
@@ -178,5 +182,20 @@ inline int paramIdByName (int chain, std::string_view name) noexcept
         return trackParam (chain, static_cast<TrackParam> (t));
     return -1;
 }
+
+// ---- stage 5: one description for every ParamId (MIDI learn, CC scaling, addresses)
+
+struct ParamInfo
+{
+    std::string_view name, label, unit;
+    float minValue = 0.f, maxValue = 1.f, defaultValue = 0.f;
+    ParamScale scale = ParamScale::Linear;
+    std::span<const std::string_view> choices;
+};
+
+bool isDefined (ParamId) noexcept;                       // true for every id that has a spec
+const ParamInfo& info (ParamId) noexcept;                // check isDefined first
+std::string address (ParamId);                           // "track.3.shakal", "fx.master.crushBits", "insert.guitar.1.bypass"
+std::optional<ParamId> fromAddress (std::string_view);   // nullopt for foreign strings
 
 } // namespace jackal

@@ -26,6 +26,8 @@ jobs:
         run: cmake --build build -j
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: Repo is clean after the tests
+        run: git status --porcelain && test -z "$(git status --porcelain)"
 
   windows-app:
     runs-on: windows-latest
@@ -37,3 +39,6 @@ jobs:
         run: cmake --build build --config Release
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: Repo is clean after the tests
+        shell: bash
+        run: git status --porcelain && test -z "$(git status --porcelain)"
