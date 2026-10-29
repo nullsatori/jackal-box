@@ -1,5 +1,6 @@
 #pragma once
 
+#include "MidiTargets.h"
 #include "ProjectController.h"
 #include "Widgets.h"
 
@@ -22,7 +23,7 @@ public:
     int rowAt (juce::Point<int> p) const;
 
 private:
-    struct Row : juce::Component
+    struct Row : juce::Component, MidiTargetArea
     {
         Row (ProjectController& c, int track);
         void paint (juce::Graphics&) override;
@@ -30,6 +31,7 @@ private:
         void mouseDown (const juce::MouseEvent&) override;
         void mouseDoubleClick (const juce::MouseEvent&) override;
         void refresh();
+        juce::String midiTargetAt (juce::Point<int> p) const override;
 
         ProjectController& c;
         int track;

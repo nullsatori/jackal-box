@@ -1,5 +1,6 @@
 #pragma once
 
+#include "MidiTargets.h"
 #include "ProjectController.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -8,7 +9,7 @@ namespace jackal
 {
 
 // Eight master glitch pads. Mouse press = hold. Ctrl+click clears that pad from the glitch lane.
-class GlitchPadBar : public juce::Component, private juce::Timer
+class GlitchPadBar : public juce::Component, public MidiTargetArea, private juce::Timer
 {
 public:
     explicit GlitchPadBar (ProjectController& controller);
@@ -18,6 +19,7 @@ public:
     void mouseUp (const juce::MouseEvent&) override;
 
     static const char* padName (int pad);
+    juce::String midiTargetAt (juce::Point<int> p) const override;
 
 private:
     void timerCallback() override;
@@ -29,6 +31,7 @@ private:
     int shownActive_ = -2, shownPending_ = -2, shownLane_ = -2;
     bool blink_ = false;
     int tick_ = 0;
+    uint32_t shownVersion_ = 0;
 };
 
 } // namespace jackal

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "MidiTargets.h"
 #include "ProjectController.h"
 #include "Widgets.h"
 
@@ -9,7 +10,9 @@ namespace jackal
 {
 
 // A..H (click = queue, drag onto another = copy), x2, grid pages, MUTATE + strength, UNDO/REDO.
-class PatternStrip : public juce::Component, private juce::Timer
+// Stage 5: the playing pattern (nixie outline) and the edited one (cyan fill) are separate; in SONG mode a click
+// only picks the pattern to edit; Shift+click appends it to the song.
+class PatternStrip : public juce::Component, public MidiTargetArea, private juce::Timer
 {
 public:
     explicit PatternStrip (ProjectController& controller);
@@ -21,6 +24,7 @@ public:
 
     void copySelected() { clipboard_ = c_.editPatternIndex(); }
     void pasteSelected();
+    juce::String midiTargetAt (juce::Point<int> p) const override;
 
 private:
     void timerCallback() override;
@@ -37,6 +41,7 @@ private:
     int pendingCopyFrom_ = -1, pendingCopyTo_ = -1;
     juce::uint32 pendingCopyTime_ = 0;
     uint32_t shownVersion_ = 0;
+    int shownPlaying_ = -2;
     bool blink_ = false;
     int blinkTick_ = 0;
 };

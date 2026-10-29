@@ -1,5 +1,7 @@
 #include "TransportBar.h"
 
+#include "MidiMapper.h"
+
 #include <cmath>
 
 namespace jackal
@@ -19,7 +21,7 @@ TransportBar::TransportBar (ProjectController& controller, EngineCore& c, AppSet
     playButton.onClick = [this] { c_.togglePlay(); };
     recButton.onClick = [this] { c_.setRecording (! c_.recording()); };
 
-    for (juce::Label* l : { &position, &patternLetter, &cpu, &swingLabel, static_cast<juce::Label*> (&masterLabel), static_cast<juce::Label*> (&shakalLabel) })
+    for (juce::Label* l : { &position, &patternLetter, &cpu, &songInfo, &swingLabel, static_cast<juce::Label*> (&masterLabel), static_cast<juce::Label*> (&shakalLabel) })
         addAndMakeVisible (*l);
     position.setJustificationType (juce::Justification::centred);
     position.setColour (juce::Label::textColourId, palette::nixie);
@@ -27,6 +29,9 @@ TransportBar::TransportBar (ProjectController& controller, EngineCore& c, AppSet
     patternLetter.setJustificationType (juce::Justification::centred);
     patternLetter.setColour (juce::Label::textColourId, palette::nixie);
     patternLetter.setFont (monoFont (24.f, true));
+    songInfo.setFont (monoFont (12.f, true));
+    songInfo.setColour (juce::Label::textColourId, palette::nixie);
+    songInfo.setJustificationType (juce::Justification::centredLeft);
     cpu.setFont (monoFont (12.f));
     cpu.setJustificationType (juce::Justification::centredRight);
     swingLabel.setText ("SWING", juce::dontSendNotification);
@@ -88,6 +93,12 @@ TransportBar::TransportBar (ProjectController& controller, EngineCore& c, AppSet
     masterShakal.onValueChange = [this] { c_.setShakal (kMasterChain, static_cast<float> (masterShakal.getValue())); };
     addAndMakeVisible (masterShakal);
 
+    setMidiTarget (playButton, MidiTarget::ofAction (ActionId::TogglePlay));
+    setMidiTarget (recButton, MidiTarget::ofAction (ActionId::Rec));
+    setMidiTarget (fillButton, MidiTarget::ofAction (ActionId::Fill));
+    setMidiTarget (master, MidiTarget::ofParam (masterParam (MasterParam::Gain)));
+    setMidiTarget (masterShakal, MidiTarget::ofParam (masterParam (MasterParam::Shakal)));
+
     startTimerHz (30);
 }
 
@@ -115,6 +126,27 @@ void TransportBar::timerCallback()
 
     const int pat = s.playing ? c_.snapshot().currentPattern : c_.editPatternIndex();
     patternLetter.setText (juce::String::charToString (static_cast<juce::juce_wchar> ('A' + juce::jlimit (0, 7, pat))), juce::dontSendNotification);
+
+    // stage 5: song position, END blinks until the transport stops
+    juce::String song;
+    const auto& snap = c_.snapshot();
+    if (c_.songMode())
+    {
+        const auto& sd = c_.song();
+        const int index = snap.songIndex >= 0 ? snap.songIndex : (sd.length > 0 ? c_.songCursor() : -1);
+        auto two = [] (int v) { return juce::String (v).paddedLeft ('0', 2); };
+        song = "SONG " + two (index + 1) + "/" + two (sd.length);
+        if (index >= 0 && index < sd.length)
+        {
+            const int reps = sd.entries[static_cast<std::size_t> (index)].repeats;
+            song << juce::String (juce::CharPointer_UTF8 (" \xc3\x97")) << reps;
+            if (s.playing && snap.songIndex >= 0)
+                song << " " << (snap.songRepeat + 1) << "/" << reps;
+        }
+        if (snap.songEnded && s.playing && (++blinkTick_ / 8) % 2 == 0)
+            song = "END";
+    }
+    songInfo.setText (song, juce::dontSendNotification);
 
     const float load = c_.cpuLoad() * 100.f;
     cpu.setText ("CPU " + juce::String (juce::roundToInt (load)) + "%", juce::dontSendNotification);
@@ -158,12 +190,13 @@ void TransportBar::resized()
     r.removeFromLeft (12);
     position.setBounds (r.removeFromLeft (70));
     patternLetter.setBounds (r.removeFromLeft (30));
-    r.removeFromLeft (12);
-    bpm.setBounds (r.removeFromLeft (220));
+    r.removeFromLeft (4);
+    songInfo.setBounds (r.removeFromLeft (112));
+    bpm.setBounds (r.removeFromLeft (156));
     r.removeFromLeft (12);
     clickToggle.setBounds (r.removeFromLeft (62));
     r.removeFromLeft (4);
-    clickGain.setBounds (r.removeFromLeft (80));
+    clickGain.setBounds (r.removeFromLeft (60));
     r.removeFromLeft (8);
     swingLabel.setBounds (r.removeFromLeft (48));
     swing.setBounds (r.removeFromLeft (40));

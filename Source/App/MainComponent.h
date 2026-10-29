@@ -2,12 +2,15 @@
 
 #include "AppSettings.h"
 #include "AudioEngine.h"
+#include "ExportOverlay.h"
 #include "GlitchPadBar.h"
 #include "GuitarStripPanel.h"
+#include "MidiMapper.h"
 #include "Plugins/PluginBrowserOverlay.h"
 #include "PatternStrip.h"
 #include "ProjectController.h"
 #include "SettingsOverlay.h"
+#include "SongStrip.h"
 #include "StatusBar.h"
 #include "StepGrid.h"
 #include "TrackHeaders.h"
@@ -48,6 +51,7 @@ public:
 private:
     void changeListenerCallback (juce::ChangeBroadcaster* source) override;
     void toggleSettings();
+    void toggleExport();
     void openBrowser (int chain, int slot);
     void browseFirstFree (int chain);
     void openDialog();
@@ -58,8 +62,10 @@ private:
     ProjectController& controller;
     juce::ApplicationCommandManager commands;
 
+    MidiMapper midiMapper;   // before the overlays that talk to it
     TransportBar transportBar;
     PatternStrip patternStrip;
+    SongStrip songStrip;
     TrackHeaders trackHeaders;
     StepGrid stepGrid;
     TrackPanel trackPanel;
@@ -68,6 +74,7 @@ private:
     StatusBar statusBar;
     SettingsOverlay settingsOverlay;
     PluginBrowserOverlay browser;
+    ExportOverlay exportOverlay;
 
     std::unique_ptr<juce::FileChooser> chooser;
     bool fillKeyDown = false;

@@ -171,6 +171,12 @@ if(JACKAL_BUILD_APP)
         Source/App/LatencyDisplay.cpp
         Source/App/DeviceSettingsPanel.cpp
         Source/App/ProjectController.cpp
+        Source/App/ProjectControllerStage5.cpp
+        Source/App/ExportJob.cpp
+        Source/App/MidiMapper.cpp
+        Source/App/LearnOverlay.cpp
+        Source/App/SongStrip.cpp
+        Source/App/ExportOverlay.cpp
         Source/App/ProjectFiles.cpp
         Source/App/SampleLoader.cpp
         Source/App/StepGrid.cpp

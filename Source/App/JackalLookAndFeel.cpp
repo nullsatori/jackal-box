@@ -53,6 +53,25 @@ juce::Typeface::Ptr JackalLookAndFeel::getTypefaceForFont (const juce::Font& fon
     return juce::LookAndFeel_V4::getTypefaceForFont (font);
 }
 
+namespace
+{
+    // stage 5: a bound control gets a 3 px dim dot top left; the one learn waits on gets a magenta outline
+    void drawMidiMarks (juce::Graphics& g, juce::Component& c, juce::Rectangle<float> r)
+    {
+        const auto& props = c.getProperties();
+        if (props.contains ("midiMapped"))
+        {
+            g.setColour (palette::dim);
+            g.fillEllipse (r.getX() + 1.f, r.getY() + 1.f, 3.f, 3.f);
+        }
+        if (static_cast<bool> (props["learning"]))
+        {
+            g.setColour (palette::magenta);
+            g.drawRect (r, 1.f);
+        }
+    }
+} // namespace
+
 void JackalLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height, float pos,
                                           float startAngle, float endAngle, juce::Slider& slider)
 {
@@ -94,6 +113,8 @@ void JackalLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int w
         g.setColour (palette::nixie);
         g.drawEllipse (bounds.withSizeKeepingCentre (radius * 2.f + 4.f, radius * 2.f + 4.f), 1.f);
     }
+
+    drawMidiMarks (g, slider, juce::Rectangle<int> (x, y, width, height).toFloat());
 }
 
 void JackalLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& button, const juce::Colour& backgroundColour,
@@ -111,6 +132,7 @@ void JackalLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b
 
     g.setColour (on ? accent : palette::gridLine.brighter (highlighted ? 0.4f : 0.f));
     g.drawRoundedRectangle (r, 2.f, 1.f);
+    drawMidiMarks (g, button, r);
 }
 
 void JackalLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& button, bool highlighted, bool)
@@ -124,6 +146,7 @@ void JackalLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton&
     g.setColour (on ? palette::neonCyan : palette::text);
     g.setFont (monoFont (12.f));
     g.drawFittedText (button.getButtonText(), button.getLocalBounds().reduced (4, 0), juce::Justification::centred, 1);
+    drawMidiMarks (g, button, r);
 }
 
 juce::Font JackalLookAndFeel::getTextButtonFont (juce::TextButton&, int buttonHeight)

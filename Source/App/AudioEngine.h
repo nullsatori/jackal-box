@@ -40,6 +40,8 @@ public:
     void openMidiInput (const juce::String& identifier);   // empty = none
     juce::String midiInputName() const;
     juce::String midiInputIdentifier() const;
+    // Stage 5: a second copy of every MIDI event for the message thread (MidiMapper drains it at 60 Hz).
+    SpscQueue<MidiEvent, 1024>& uiMidi() noexcept { return uiMidi_; }
 
     // Stage 4: loopCompSamples = (measured round trip for this device, or driver in + out) + manual offset.
     // Message thread: at start, on device change, after a calibration and when the slider moves.
@@ -59,6 +61,7 @@ private:
 
     juce::AudioDeviceManager deviceManager_;
     EngineCore core_;
+    SpscQueue<MidiEvent, 1024> uiMidi_;
     juce::String lastError_;
     std::unique_ptr<juce::MidiInput> midiInput_;
     double sampleRate_ = 48000.0;

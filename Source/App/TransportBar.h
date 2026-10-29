@@ -34,7 +34,7 @@ private:
 
     juce::TextButton playButton { "PLAY" }, recButton { "REC" };
     FillButton fillButton;
-    juce::Label position, patternLetter, cpu;
+    juce::Label position, patternLetter, cpu, songInfo;   // songInfo: SONG 03/12 x2 1/2, END (stage 5)
     juce::Slider bpm { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
     juce::ToggleButton clickToggle { "CLICK" };
     juce::Slider clickGain { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
@@ -49,6 +49,7 @@ private:
     ClickLabel masterLabel, shakalLabel;
 
     bool shownPlaying = false;
+    int blinkTick_ = 0;
     uint32_t shownVersion_ = 0;
 };
 

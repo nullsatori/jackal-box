@@ -68,6 +68,7 @@ void AudioEngine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiM
     e.data1 = raw[1];
     e.data2 = message.getRawDataSize() > 2 ? raw[2] : uint8_t (0);
     core_.midi().push (e);
+    uiMidi_.push (e);   // stage 5: the same event for MidiMapper (learn, CC, actions)
 }
 
 void AudioEngine::initialise (const juce::XmlElement* savedState)

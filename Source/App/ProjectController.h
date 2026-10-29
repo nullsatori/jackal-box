@@ -8,6 +8,9 @@
 #include "Plugins/PluginHost.h"
 #include "Plugins/PluginScanner.h"
 
+#include "ExportJob.h"
+
+#include "Model/MidiMap.h"
 #include "Model/Project.h"
 
 #include <juce_data_structures/juce_data_structures.h>
@@ -87,7 +90,7 @@ public:
     void setSourceBars (int track, double bars);
     void setFitToTempo (int track, bool fit);
     void setChoke (int track, int group);
-    void importFile (int track, const juce::File& file);
+    void importFile (int track, const juce::File& file, bool keepSlicing = false);   // keepSlicing: Ctrl+Up/Down keeps mode and bars
 
     // ---- SHAKAL (stage 3), undoable. chain 0..7 = track, kMasterChain = master.
     void setFx (int chain, FxParam p, float value);    // Bypass and Preset included
@@ -167,10 +170,46 @@ public:
     bool save();
     bool saveAs (const juce::File& folder);
 
+    // ---- song (stage 5). Edits are undoable (one transaction per gesture); mode, follow and cursor are not.
+    const SongData& song() const noexcept { return project_->song; }
+    void editSong (const juce::String& gesture, const std::function<void (SongData&)>& fn);
+    void applySong (const SongData&);   // undo actions
+    bool songMode() const noexcept { return project_->ui.songMode; }
+    void setSongMode (bool on);
+    bool follow() const noexcept { return project_->ui.follow; }
+    void setFollow (bool on);
+    int songCursor() const noexcept { return project_->ui.songCursor; }
+    void setSongCursor (int index);
+    void selectEditPattern (int index);   // edit only, no QueuePattern; turns FOLLOW off in SONG mode
+    void patternClicked (int index);      // A..H / F1..F8: PTN queue + edit, SONG edit only
+    void appendToSong (int pattern);      // Shift+click, Shift+F1..F8
+
+    // ---- retro capture (stage 5): the last `bars` bars of live hits into the playing pattern
+    void capture (int bars);
+
+    // ---- MIDI (stage 5): MidiMapper calls these
+    void setParamFromMidi (ParamId id, float value);
+    void performAction (ActionId action, int index, bool pressed, int velocity);
+    float paramValue (ParamId id) const;   // the model value behind an address (for learn text and the CC feedback seam)
+
+    // ---- export (stage 5)
+    const ExportSettings& exportSettings() const noexcept { return project_->exportSettings; }
+    void setExportSettings (const ExportSettings&);
+    juce::String startExport (RenderScope scope);   // empty on success, else why not
+    void cancelExport();
+    ExportState exportState() const;
+    bool exportAllowed() const;   // false while a loop is armed or recording
+    juce::File exportFolder() const;
+
+    // ---- sample stepping (stage 5): Ctrl+Up / Ctrl+Down
+    void stepSampleFile (int track, int delta);
+
     std::function<void (bool ok)> onCalibration;   // CalibrationDone from the engine
 
     juce::String lastError() const noexcept { return lastError_; }
-    void setStatus (const juce::String& text) { lastError_ = text; bump(); }
+    void setStatus (const juce::String& text, bool alarm = false) { lastError_ = text; statusAlarm_ = alarm; bump(); }
+    bool statusAlarm() const noexcept { return statusAlarm_; }
+    void touch() { bump(); }   // something the UI paints changed outside the model (MIDI map)
 
     // Undo actions call these.
     void applyPattern (int index, const Pattern& p);
@@ -188,6 +227,10 @@ private:
 
     void timerCallback() override;
     void publishDirtyPatterns();
+    void publishDirtySong();
+    void followSnapshot (const SequencerSnapshot& previous);
+    void finishCapture (bool complete);
+    void pollExport();
     void drainEngine();
     void pushTrack (int track);
     void pushFx (int chain, const FxSettings& fx);
@@ -222,6 +265,17 @@ private:
     LoopController loops_;
     std::pair<int, int> lastInsert_ { -1, -1 };
 
+    bool songDirty_ = true;
+    bool capturing_ = false;
+    double captureStartMs_ = 0.0;
+    std::vector<EngineEvent> captureBuffer_;
+    ParamId midiParam_ = 0xFFFF;
+    double midiParamMs_ = 0.0;
+    std::unique_ptr<ExportJob> export_;
+    ExportOutcome lastExport_;
+    bool hasLastExport_ = false;
+    juce::String lastExportText_;
+
     SequencerSnapshot snap_ {};
     std::array<double, kNumTracks> hitTime_ {};
     StepRef lastTouched_ {};
@@ -229,6 +283,7 @@ private:
     juce::String lastError_;
     uint32_t version_ = 1;
     bool dirty_ = false;
+    bool statusAlarm_ = false;
     bool recording_ = false;
     bool fill_ = false;
     bool stopped_ = false;

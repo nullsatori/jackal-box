@@ -19,7 +19,7 @@ public:
         setUsingNativeTitleBar (true);
         setContentOwned (content, true);
         setResizable (true, true);
-        setResizeLimits (1100, 760, 4096, 4096);
+        setResizeLimits (1100, 800, 4096, 4096);
 
         const auto saved = settings.windowBounds();
         if (saved.isNotEmpty())

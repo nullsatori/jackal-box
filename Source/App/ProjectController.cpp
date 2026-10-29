@@ -8,6 +8,7 @@
 #include "Model/PatternOps.h"
 #include "Model/ProjectJson.h"
 #include "Model/Slicer.h"
+#include "Model/SongOps.h"
 
 #include <random>
 
@@ -150,6 +151,15 @@ void ProjectController::shutdown()
         return;
     stopped_ = true;
     stopTimer();
+
+    if (export_ != nullptr)
+    {
+        export_->stop (5000);
+        if (export_->isDone())
+            for (auto* p : export_->takeOutcome().retiredInserts)
+                delete p;
+        export_.reset();
+    }
 
     if (dirty_)
         save();
@@ -360,7 +370,7 @@ int ProjectController::slotForImport (int track) const
     return -1;
 }
 
-void ProjectController::importFile (int track, const juce::File& file)
+void ProjectController::importFile (int track, const juce::File& file, bool keepSlicing)
 {
     if (! files::isAudioFile (file))
     {
@@ -394,6 +404,12 @@ void ProjectController::importFile (int track, const juce::File& file)
     if (loopish && after.sliceMode == SliceMode::Off)
         after.sliceMode = SliceMode::Grid16;
     after.sourceBars = 0.0;   // guessed by the loader when the file is decoded (loop-like tracks only)
+    after.origin = file.getFullPathName().toStdString();   // stage 5: Ctrl+Up/Down walks this folder
+    if (keepSlicing && before.source == "file")
+    {
+        after.sliceMode = before.sliceMode;
+        after.sourceBars = before.sourceBars;
+    }
 
     beginGesture ("Import " + file.getFileName());
     undo_.perform (new SlotAction (*this, slot, before, after));
@@ -874,6 +890,25 @@ void ProjectController::pushAll()
         reloadSlot (s);
     dirtyPatterns_.set();
     publishDirtyPatterns();
+
+    // stage 5: the song, its cursor and the mode (QueuePattern above left any old song)
+    project_->ui.songCursor = 0;
+    songDirty_ = true;
+    publishDirtySong();
+    core.commands().push ({ CommandType::SetSongPosition, 0.f, 0 });
+    if (project_->ui.songMode)
+        core.commands().push ({ CommandType::SetSongMode, 0.f, 1 });
+}
+
+void ProjectController::publishDirtySong()
+{
+    if (! songDirty_)
+        return;
+    auto* s = new SongData (project_->song);
+    if (engine_.core().commands().push ({ CommandType::SetSong, 0.f, 0, s }))
+        songDirty_ = false;
+    else
+        delete s;   // queue full: next frame
 }
 
 void ProjectController::publishDirtyPatterns()
@@ -1005,6 +1040,11 @@ void ProjectController::drainEngine()
 
             case EngineEventType::StepRecorded:
             {
+                if (capturing_)
+                {
+                    captureBuffer_.push_back (e);   // during a capture every StepRecorded belongs to it
+                    break;
+                }
                 const int playing = juce::jlimit (0, kNumPatterns - 1, static_cast<int> (snap_.currentPattern));
                 const int track = e.track, slot = e.step, vel = e.value;
                 editPatternAt (playing, [=] (Pattern& p) {
@@ -1032,6 +1072,17 @@ void ProjectController::drainEngine()
                 if (onCalibration)
                     onCalibration (e.value != 0);
                 break;
+
+            case EngineEventType::CaptureDone:
+                if (capturing_)
+                    finishCapture (true);
+                break;
+
+            case EngineEventType::SongEnded:
+                if (core.transportSnapshot().playing)
+                    core.commands().push ({ CommandType::Stop, 0.f, 0 });
+                setStatus ("song ended");
+                break;
         }
     }
 
@@ -1041,6 +1092,10 @@ void ProjectController::drainEngine()
     {
         if (r.kind == Retired::Kind::Pattern)
             delete static_cast<const Pattern*> (r.ptr);
+        else if (r.kind == Retired::Kind::Song)
+            delete static_cast<const SongData*> (r.ptr);
+        else if (r.kind == Retired::Kind::NoteMap)
+            delete static_cast<const MidiNoteMap*> (r.ptr);
         else if (r.kind == Retired::Kind::Insert)
             inserts_.onRetired (r.ptr);
         else
@@ -1058,15 +1113,21 @@ void ProjectController::drainEngine()
 void ProjectController::timerCallback()
 {
     publishDirtyPatterns();
+    publishDirtySong();
     if (inserts_.pollChanged())
         markDirty();
+    pollExport();
 
     if (++tick_ % 2 == 0)
     {
         drainEngine();
-        const auto s = engine_.core().sequencerSnapshot();
-        snap_ = s;
+        const auto previous = snap_;
+        snap_ = engine_.core().sequencerSnapshot();
+        followSnapshot (previous);
     }
+
+    if (capturing_ && juce::Time::getMillisecondCounterHiRes() - captureStartMs_ > 1000.0)
+        finishCapture (false);   // CaptureDone did not come (the event queue was full)
 
     const double now = juce::Time::getMillisecondCounterHiRes();
     if (dirty_ && now - lastSaveMs_ > kAutosaveMs)

@@ -35,7 +35,16 @@ PatternStrip::PatternStrip (ProjectController& controller)
     strength.onValueChange = [this] { c_.setMutationStrength (static_cast<float> (strength.getValue())); };
     addAndMakeVisible (strength);
 
+    setMidiTarget (mutateButton, MidiTarget::ofAction (ActionId::Mutate));
+    setMidiTarget (undoButton, MidiTarget::ofAction (ActionId::Undo));
+    setMidiTarget (redoButton, MidiTarget::ofAction (ActionId::Redo));
     startTimerHz (30);
+}
+
+juce::String PatternStrip::midiTargetAt (juce::Point<int> p) const
+{
+    const int i = patternAt (p);
+    return i >= 0 ? juce::String (targetToString (MidiTarget::ofAction (ActionId::Pattern, i))) : juce::String();
 }
 
 void PatternStrip::pasteSelected()
@@ -74,6 +83,13 @@ void PatternStrip::timerCallback()
             repaint();
     }
 
+    const int playingNow = c_.transport().playing ? c_.snapshot().currentPattern : -1;
+    if (playingNow != shownPlaying_)
+    {
+        shownPlaying_ = playingNow;
+        repaint();
+    }
+
     if (c_.version() == shownVersion_)
         return;
     shownVersion_ = c_.version();
@@ -110,6 +126,11 @@ int PatternStrip::patternAt (juce::Point<int> p) const
 void PatternStrip::mouseDown (const juce::MouseEvent& e)
 {
     dragFrom_ = patternAt (e.getPosition());
+    if (dragFrom_ >= 0 && e.mods.isShiftDown())
+    {
+        c_.appendToSong (dragFrom_);   // Shift+click: to the end of the song, in any mode
+        dragFrom_ = -1;
+    }
 }
 
 void PatternStrip::mouseUp (const juce::MouseEvent& e)
@@ -118,7 +139,7 @@ void PatternStrip::mouseUp (const juce::MouseEvent& e)
     if (dragFrom_ >= 0 && to >= 0)
     {
         if (to == dragFrom_)
-            c_.queuePattern (to);
+            c_.patternClicked (to);   // PTN: queue + edit; SONG: edit only
         else
             requestCopy (dragFrom_, to);
     }
@@ -137,22 +158,31 @@ void PatternStrip::paint (juce::Graphics& g)
     for (int i = 0; i < kNumPatterns; ++i)
     {
         const auto r = patternButton (i).toFloat();
-        const bool current = playing ? snap.currentPattern == i : c_.editPatternIndex() == i;
-        const bool pending = snap.pendingPattern == i;
+        const bool playingThis = playing && snap.currentPattern == i;
+        const bool pending = snap.pendingPattern == i && ! c_.songMode();
         const bool editing = c_.editPatternIndex() == i;
         const bool empty = ops::isEmpty (c_.project().patterns[static_cast<std::size_t> (i)]);
 
-        if (current)
+        if (editing)
         {
-            g.setColour (palette::nixie.withAlpha (0.25f));
+            g.setColour (palette::neonCyan.withAlpha (0.25f));
             g.fillRoundedRectangle (r, 2.f);
         }
-        g.setColour (current ? palette::nixie : (pending && blink_ ? palette::nixie : (editing ? palette::neonCyan : palette::gridLine)));
-        g.drawRoundedRectangle (r.reduced (0.5f), 2.f, pending || editing ? 1.5f : 1.f);
+        if (playingThis)
+        {
+            g.setColour (palette::nixie);
+            g.drawRoundedRectangle (r.reduced (1.f), 2.f, 2.f);
+        }
+        else
+        {
+            g.setColour (pending && blink_ ? palette::nixie : (editing ? palette::neonCyan : palette::gridLine));
+            g.drawRoundedRectangle (r.reduced (0.5f), 2.f, pending ? 2.f : 1.f);
+        }
 
-        g.setColour (empty ? palette::dim : palette::text);
+        g.setColour (empty ? palette::dim : (editing ? palette::neonCyan : palette::text));
         g.setFont (monoFont (15.f, true));
         g.drawText (juce::String::charToString (static_cast<juce::juce_wchar> ('A' + i)), r.toNearestInt(), juce::Justification::centred, false);
+        midifeedback::drawMarks (g, r, juce::String (targetToString (MidiTarget::ofAction (ActionId::Pattern, i))));
     }
 }
 

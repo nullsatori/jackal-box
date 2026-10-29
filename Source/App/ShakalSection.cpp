@@ -1,5 +1,7 @@
 #include "ShakalSection.h"
 
+#include "MidiTargets.h"
+
 #include "Model/ParamSpec.h"
 
 namespace jackal
@@ -236,6 +238,24 @@ void ShakalSection::refresh()
             r->sw.setButtonText (s ? r->switchOn : r->switchOff);
             r->sw.setToggleState (s, juce::dontSendNotification);
         }
+    }
+
+    // stage 5: MIDI targets follow the chain this section shows
+    const ParamId macroId = ch == kMasterChain ? masterParam (MasterParam::Shakal)
+                          : ch == kGuitarChain ? guitarParam (GuitarParam::Shakal)
+                                               : trackParam (ch, TrackParam::Shakal);
+    setMidiTarget (macro, MidiTarget::ofParam (macroId));
+    setMidiTarget (bypass, MidiTarget::ofParam (fxParam (ch, FxParam::Bypass)));
+    for (auto& b : presets)
+        setMidiTarget (b, MidiTarget::ofParam (fxParam (ch, FxParam::Preset)));
+    setMidiTarget (reroll, MidiTarget::ofAction (ActionId::Reroll));
+    for (auto& r : rows)
+    {
+        setMidiTarget (r->on, MidiTarget::ofParam (fxParam (ch, r->onParam)));
+        for (std::size_t k = 0; k < r->knobs.size(); ++k)
+            setMidiTarget (*r->knobs[k], MidiTarget::ofParam (fxParam (ch, r->knobParams[k])));
+        if (r->switchParam != FxParam::Count)
+            setMidiTarget (r->sw, MidiTarget::ofParam (fxParam (ch, r->switchParam)));
     }
     repaint();
 }

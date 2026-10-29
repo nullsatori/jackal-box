@@ -41,7 +41,18 @@ TrackHeaders::Row::Row (ProjectController& controller, int t)
     };
     addAndMakeVisible (shakal);
 
+    // stage 5: MIDI learn targets (bound to this track, not to "the selected one")
+    setMidiTarget (mute, MidiTarget::ofAction (ActionId::Mute, track));
+    setMidiTarget (solo, MidiTarget::ofAction (ActionId::Solo, track));
+    setMidiTarget (volume, MidiTarget::ofParam (trackParam (track, TrackParam::Volume)));
+    setMidiTarget (shakal, MidiTarget::ofParam (trackParam (track, TrackParam::Shakal)));
+
     refresh();
+}
+
+juce::String TrackHeaders::Row::midiTargetAt (juce::Point<int> p) const
+{
+    return p.x >= 18 && p.x < 88 ? juce::String (targetToString (MidiTarget::ofAction (ActionId::SelectTrack, track))) : juce::String();
 }
 
 void TrackHeaders::Row::refresh()
@@ -89,6 +100,8 @@ void TrackHeaders::Row::paint (juce::Graphics& g)
     g.setFont (monoFont (13.f, true));
     g.drawText (juce::String (t.name.empty() ? "T" + std::to_string (track + 1) : t.name), juce::Rectangle<int> (18, 0, 70, getHeight()),
                 juce::Justification::centredLeft, true);
+    midifeedback::drawMarks (g, juce::Rectangle<float> (16.f, 2.f, 72.f, static_cast<float> (getHeight()) - 4.f),
+                             juce::String (targetToString (MidiTarget::ofAction (ActionId::SelectTrack, track))));
 }
 
 void TrackHeaders::Row::resized()

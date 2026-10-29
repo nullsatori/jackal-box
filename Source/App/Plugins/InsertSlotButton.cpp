@@ -1,5 +1,7 @@
 #include "InsertSlotButton.h"
 
+#include "../MidiTargets.h"
+
 #include "../JackalLookAndFeel.h"
 #include "../Widgets.h"
 
@@ -36,6 +38,7 @@ void InsertSlotButton::timerCallback()
         bypass.setVisible (used);
         remove.setVisible (used);
         bypass.setToggleState (c_.insertSpec (chain_(), slot_).bypass, juce::dontSendNotification);
+        setMidiTarget (bypass, MidiTarget::ofParam (insertParam (chain_(), slot_, InsertParam::Bypass)));   // stage 5
         repaint();
     }
 }

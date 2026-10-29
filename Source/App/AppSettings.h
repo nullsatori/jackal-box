@@ -48,6 +48,11 @@ public:
     int loopCal (const juce::String& deviceName) const;   // measured round trip in samples, -1 = none
     void setLoopCal (const juce::String& deviceName, int samples);
 
+    // stage 5
+    juce::String exportFolder() const;            // empty = <project>.jackal/export
+    void setExportFolder (const juce::String&);
+    juce::File folder() const;                    // %APPDATA%\JackalBox (midimap.json lives here too)
+
     void saveNow();
 
 private:

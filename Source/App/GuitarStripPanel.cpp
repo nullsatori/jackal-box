@@ -1,5 +1,7 @@
 #include "GuitarStripPanel.h"
 
+#include "MidiTargets.h"
+
 #include "JackalLookAndFeel.h"
 
 #include "Model/ParamSpec.h"
@@ -67,6 +69,15 @@ GuitarStripPanel::GuitarStripPanel (ProjectController& c, AudioEngine& engine, A
     dub.onClick = [this] { c_.loops().busy() ? c_.loops().cancel() : c_.loops().dub(); };
     undo.onClick = [this] { c_.loops().undo(); };
     toTrack.onClick = [this] { c_.loops().toTrack(); };
+    // stage 5: MIDI learn targets
+    setMidiTarget (rec, MidiTarget::ofAction (ActionId::LoopRec));
+    setMidiTarget (dub, MidiTarget::ofAction (ActionId::LoopDub));
+    setMidiTarget (undo, MidiTarget::ofAction (ActionId::LoopUndo));
+    setMidiTarget (tap, MidiTarget::ofParam (guitarParam (GuitarParam::LoopTap)));
+    setMidiTarget (gate, MidiTarget::ofParam (guitarParam (GuitarParam::GateDb)));
+    setMidiTarget (hpf, MidiTarget::ofParam (guitarParam (GuitarParam::HpfHz)));
+    setMidiTarget (shakal, MidiTarget::ofParam (guitarParam (GuitarParam::Shakal)));
+    setMidiTarget (loopGain, MidiTarget::ofParam (guitarParam (GuitarParam::LoopGainDb)));
     tap.setClickingTogglesState (false);
     tap.onClick = [this] {
         c_.beginGesture ("Loop tap");

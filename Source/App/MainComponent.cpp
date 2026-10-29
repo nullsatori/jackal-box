@@ -5,6 +5,7 @@
 #include "ProjectFiles.h"
 
 #include "Model/PatternOps.h"
+#include "Model/SongOps.h"
 
 namespace jackal
 {
@@ -15,22 +16,27 @@ MainComponent::MainComponent (AudioEngine& e, AppSettings& s, ProjectController&
     : engine (e),
       settings (s),
       controller (c),
+      midiMapper (e, c, s),
       transportBar (c, e.core(), s),
       patternStrip (c),
+      songStrip (c),
       trackHeaders (c),
       stepGrid (c),
       trackPanel (c),
       guitarStrip (c, e, s),
       padBar (c),
       statusBar (c, e),
-      settingsOverlay (e, s),
-      browser (c, s)
+      settingsOverlay (e, s, midiMapper),
+      browser (c, s),
+      exportOverlay (c, s)
 {
-    for (auto* comp : std::initializer_list<juce::Component*> { &transportBar, &patternStrip, &trackHeaders, &stepGrid,
+    for (auto* comp : std::initializer_list<juce::Component*> { &transportBar, &patternStrip, &songStrip, &trackHeaders, &stepGrid,
                                                                  &trackPanel, &guitarStrip, &padBar, &statusBar })
         addAndMakeVisible (comp);
     addChildComponent (settingsOverlay);
     addChildComponent (browser);
+    addChildComponent (exportOverlay);
+    exportOverlay.onClosed = [this] { grabKeyboardFocus(); };
 
     guitarStrip.onBrowse = [this] (int ch, int sl) { openBrowser (ch, sl); };
     trackPanel.vst.onBrowse = [this] (int ch, int sl) { openBrowser (ch, sl); };
@@ -38,6 +44,8 @@ MainComponent::MainComponent (AudioEngine& e, AppSettings& s, ProjectController&
     engine.updateLoopComp (settings);
 
     statusBar.onSettings = [this] { toggleSettings(); };
+    statusBar.onExport = [this] { toggleExport(); };
+    statusBar.midiLed = [this] { return midiMapper.ledOn(); };
 
     commands.registerAllCommandsForTarget (this);
     commands.setFirstCommandTarget (this);
@@ -45,7 +53,10 @@ MainComponent::MainComponent (AudioEngine& e, AppSettings& s, ProjectController&
     engine.deviceManager().addChangeListener (this);
 
     setWantsKeyboardFocus (true);
-    setSize (1280, 860);
+    setSize (1280, 900);
+
+    midiMapper.attach (*this);   // the learn overlay goes on top of everything added above
+    midiMapper.start();
 }
 
 MainComponent::~MainComponent()
@@ -69,14 +80,31 @@ void MainComponent::toggleSettings()
         settingsOverlay.refreshMidiDevices();
         settingsOverlay.refreshTiming();
         browser.setVisible (false);   // one overlay at a time
+        if (exportOverlay.isVisible())
+            exportOverlay.close();
     }
     settingsOverlay.setVisible (! settingsOverlay.isVisible());
+    grabKeyboardFocus();
+}
+
+void MainComponent::toggleExport()
+{
+    if (exportOverlay.isVisible())
+    {
+        exportOverlay.close();
+        return;
+    }
+    settingsOverlay.setVisible (false);
+    browser.setVisible (false);
+    exportOverlay.open();
     grabKeyboardFocus();
 }
 
 void MainComponent::openBrowser (int chain, int slot)
 {
     settingsOverlay.setVisible (false);
+    if (exportOverlay.isVisible())
+        exportOverlay.close();
     controller.setLastInsert (chain, slot);
     browser.openFor (chain, slot);
 }
@@ -93,10 +121,11 @@ void MainComponent::getAllCommands (juce::Array<juce::CommandID>& ids)
 {
     ids.addArray ({ togglePlay, toggleRec });
     for (int i = 0; i < 16; ++i) ids.add (stepBase + i);
-    for (int i = 0; i < 8; ++i) ids.addArray ({ hitBase + i, hitAccentBase + i, patternBase + i });
+    for (int i = 0; i < 8; ++i) ids.addArray ({ hitBase + i, hitAccentBase + i, patternBase + i, appendBase + i });
     ids.addArray ({ rowUp, rowDown, shiftLeft, shiftRight, nudgeLeft, nudgeRight, pageUp, pageDown, doubleLen, mutateCmd,
                     undoCmd, redoCmd, redoAlt, saveCmd, saveAsCmd, openCmd, newCmd, closeOverlay, deletePLocks, nextTab,
-                    loopEnter, loopRec, loopUndo, browseTrack, browseGuitar, toggleEditorCmd });
+                    loopEnter, loopRec, loopUndo, browseTrack, browseGuitar, toggleEditorCmd,
+                    songModeCmd, followCmd, exportCmd, learnCmd, captureCmd, sampleUp, sampleDown });
 }
 
 void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommandInfo& info)
@@ -120,6 +149,8 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         return set ("Hit track accent", kHitKeys[static_cast<std::size_t> (id - hitAccentBase)], shift);
     if (id >= patternBase && id < patternBase + 8)
         return set ("Queue pattern", KP::F1Key + (id - patternBase), none);
+    if (id >= appendBase && id < appendBase + 8)
+        return set ("Append pattern to the song", KP::F1Key + (id - appendBase), shift);
 
     switch (id)
     {
@@ -151,6 +182,13 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case browseTrack:  return set ("Plugin for the track", 'P', ctrl);
         case browseGuitar: return set ("Plugin for the guitar", 'P', ctrl | shift);
         case toggleEditorCmd: return set ("Plugin editor", 'E', ctrl);
+        case songModeCmd:  return set ("PTN / SONG", 'P', none);
+        case followCmd:    return set ("FOLLOW", 'O', none);
+        case exportCmd:    return set ("Export", 'E', ctrl | shift);
+        case learnCmd:     return set ("MIDI learn", 'L', ctrl);
+        case captureCmd:   return set ("Capture the last 2 bars", 'R', ctrl | shift);
+        case sampleUp:     return set ("Previous sample in the folder", KP::upKey, ctrl);
+        case sampleDown:   return set ("Next sample in the folder", KP::downKey, ctrl);
         default: break;
     }
 }
@@ -173,7 +211,8 @@ bool MainComponent::perform (const InvocationInfo& info)
     }
     if (id >= hitBase && id < hitBase + 8)          { controller.triggerTrack (id - hitBase, 100); return true; }
     if (id >= hitAccentBase && id < hitAccentBase + 8) { controller.triggerTrack (id - hitAccentBase, 127); return true; }
-    if (id >= patternBase && id < patternBase + 8)  { controller.queuePattern (id - patternBase); return true; }
+    if (id >= patternBase && id < patternBase + 8)  { controller.patternClicked (id - patternBase); return true; }
+    if (id >= appendBase && id < appendBase + 8)    { controller.appendToSong (id - appendBase); return true; }
 
     switch (id)
     {
@@ -203,15 +242,29 @@ bool MainComponent::perform (const InvocationInfo& info)
         case openCmd:    openDialog(); return true;
         case newCmd:     controller.newProject(); return true;
         case closeOverlay:
+            if (midiMapper.learning())   // stage 5: learn first, then the plugin window, then the overlay
+            {
+                midiMapper.cancelLearn();
+                return true;
+            }
             if (controller.inserts().closeTopEditor())
                 return true;
             if (settingsOverlay.calibrating())
                 settingsOverlay.cancelCalibration();
             else if (browser.isVisible())
                 browser.close();
+            else if (exportOverlay.isVisible())
+                exportOverlay.close();
             else if (settingsOverlay.isVisible())
                 toggleSettings();
             return true;
+        case songModeCmd: controller.setSongMode (! controller.songMode()); return true;
+        case followCmd:   controller.setFollow (! controller.follow()); return true;
+        case exportCmd:   toggleExport(); return true;
+        case learnCmd:    midiMapper.learning() ? midiMapper.cancelLearn() : midiMapper.beginLearn(); return true;
+        case captureCmd:  controller.capture (2); return true;
+        case sampleUp:
+        case sampleDown:  controller.stepSampleFile (track, id == sampleDown ? 1 : -1); return true;
         case loopEnter:  controller.loops().enter(); return true;
         case loopRec:    controller.loops().busy() ? controller.loops().cancel() : controller.loops().rec (controller.loops().bars()); return true;
         case loopUndo:   controller.loops().undo(); return true;
@@ -228,6 +281,12 @@ bool MainComponent::perform (const InvocationInfo& info)
             controller.setTrackPanelTab (controller.trackPanelTab() + 1);
             return true;
         case deletePLocks:
+            if (auto entry = songStrip.hoverEntry())   // stage 5: over a song cell it removes the entry
+            {
+                const int at = *entry;
+                controller.editSong ("Song remove", [at] (SongData& song) { songops::remove (song, at); });
+                return true;
+            }
             if (auto s = stepGrid.hoverStep())
             {
                 const auto st = *s;
@@ -355,6 +414,7 @@ void MainComponent::resized()
     auto r = getLocalBounds();
     transportBar.setBounds (r.removeFromTop (64));
     patternStrip.setBounds (r.removeFromTop (40));
+    songStrip.setBounds (r.removeFromTop (36));
     statusBar.setBounds (r.removeFromBottom (28));
     padBar.setBounds (r.removeFromBottom (72));
     const auto overlayArea = r;
@@ -367,6 +427,8 @@ void MainComponent::resized()
     auto over = overlayArea;
     settingsOverlay.setBounds (over.removeFromRight (520));
     browser.setBounds (settingsOverlay.getBounds());
+    exportOverlay.setBounds (settingsOverlay.getBounds());
+    midiMapper.layout();
 }
 
 } // namespace jackal

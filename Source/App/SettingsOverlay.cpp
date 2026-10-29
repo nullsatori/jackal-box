@@ -5,8 +5,8 @@
 namespace jackal
 {
 
-SettingsOverlay::SettingsOverlay (AudioEngine& engine, AppSettings& settings)
-    : engine_ (engine), settings_ (settings), devices (engine.deviceManager()), monitor (engine, settings)
+SettingsOverlay::SettingsOverlay (AudioEngine& engine, AppSettings& settings, MidiMapper& mapper)
+    : engine_ (engine), settings_ (settings), devices (engine.deviceManager()), monitor (engine, settings), mapper_ (mapper)
 {
     addAndMakeVisible (devices);
     addAndMakeVisible (monitor);
@@ -75,8 +75,131 @@ SettingsOverlay::SettingsOverlay (AudioEngine& engine, AppSettings& settings)
         refreshTiming();
     };
 
+    // ---- stage 5: pages and the MIDI page
+    for (auto* b : { &audioTab, &midiTab, &learn, &clearAll })
+    {
+        b->setMouseClickGrabsKeyboardFocus (false);
+        b->setWantsKeyboardFocus (false);
+        addAndMakeVisible (*b);
+    }
+    audioTab.setColour (juce::TextButton::buttonOnColourId, palette::neonCyan);
+    midiTab.setColour (juce::TextButton::buttonOnColourId, palette::neonCyan);
+    audioTab.onClick = [this] { showPage (0); };
+    midiTab.onClick = [this] { showPage (1); };
+
+    midiTitle.setFont (monoFont (12.f, true));
+    midiTitle.setColour (juce::Label::textColourId, palette::neonCyan);
+    bindingsTitle.setFont (monoFont (12.f, true));
+    bindingsTitle.setColour (juce::Label::textColourId, palette::neonCyan);
+    for (auto* l : { &midiTitle, &channelLabel, &bindingsTitle, &hitLabel, &midiHint })
+    {
+        if (l != &midiTitle && l != &bindingsTitle)
+            l->setFont (monoFont (12.f));
+        addAndMakeVisible (*l);
+    }
+    midiHint.setColour (juce::Label::textColourId, palette::dim);
+    midiHint.setFont (monoFont (11.f));
+    midiHint.setText ("right click any knob or button: MIDI learn / clear. Ctrl+L: learn", juce::dontSendNotification);
+
+    channel.addItem ("OMNI", 1);
+    for (int ch = 1; ch <= 16; ++ch)
+        channel.addItem (juce::String (ch), ch + 1);
+    channel.onChange = [this] { mapper_.setChannel (channel.getSelectedItemIndex()); };
+    addAndMakeVisible (channel);
+
+    defaultNotes.setButtonText (juce::String (juce::CharPointer_UTF8 ("NOTES C..G â TRACKS")));
+    defaultNotes.onClick = [this] { mapper_.setDefaultNotes (defaultNotes.getToggleState()); };
+    addAndMakeVisible (defaultNotes);
+
+    learn.setColour (juce::TextButton::textColourOffId, palette::magenta);
+    learn.onClick = [this] { mapper_.beginLearn(); };
+    clearAll.onClick = [this] {
+        const auto now = juce::Time::getMillisecondCounter();
+        if (clearArmedMs_ != 0 && now - clearArmedMs_ < 3000)
+        {
+            clearArmedMs_ = 0;
+            mapper_.clearAll();
+            clearAll.setButtonText ("CLEAR ALL");
+        }
+        else
+        {
+            clearArmedMs_ = now;
+            clearAll.setButtonText ("SURE?");
+        }
+    };
+    for (int i = 0; i < 8; ++i)
+    {
+        auto& b = hitButtons[static_cast<std::size_t> (i)];
+        b.setButtonText (juce::String (i + 1));
+        b.setMouseClickGrabsKeyboardFocus (false);
+        b.setWantsKeyboardFocus (false);
+        b.setTooltip ("learn a pad of your controller for TRACK HIT " + juce::String (i + 1));
+        b.onClick = [this, i, &b] { mapper_.learnTarget (MidiTarget::ofAction (ActionId::TrackHit, i), &b); };
+        addAndMakeVisible (b);
+    }
+    bindings.setRowHeight (20);
+    bindings.setColour (juce::ListBox::backgroundColourId, palette::background);
+    bindings.setOutlineThickness (1);
+    bindings.setColour (juce::ListBox::outlineColourId, palette::gridLine);
+    addAndMakeVisible (bindings);
+
+    refreshMidiMap();
+    showPage (0);
+
     refreshTiming();
     startTimerHz (10);
+}
+
+void SettingsOverlay::showPage (int page)
+{
+    page_ = page == 1 ? 1 : 0;
+    audioTab.setToggleState (page_ == 0, juce::dontSendNotification);
+    midiTab.setToggleState (page_ == 1, juce::dontSendNotification);
+    const bool a = page_ == 0;
+    for (juce::Component* c : std::initializer_list<juce::Component*> { &devices, &monitor, &timingTitle, &driverLine, &manualLabel, &measuredLine,
+                                                                          &manual, &cal, &useMeasured, &foldersTitle, &folders, &addFolder,
+                                                                          &removeFolder })
+        c->setVisible (a);
+    std::vector<juce::Component*> midiPage { &midiLabel, &midi, &midiTitle, &channelLabel, &bindingsTitle, &hitLabel, &midiHint, &channel,
+                                             &defaultNotes, &learn, &clearAll, &bindings };
+    for (auto& b : hitButtons)
+        midiPage.push_back (&b);
+    for (auto* c : midiPage)
+        c->setVisible (! a);
+    if (! a)
+        refreshMidiMap();
+}
+
+void SettingsOverlay::refreshMidiMap()
+{
+    shownMapVersion_ = mapper_.version();
+    channel.setSelectedItemIndex (mapper_.map().channel, juce::dontSendNotification);
+    defaultNotes.setToggleState (mapper_.map().defaultNotes, juce::dontSendNotification);
+    bindings.updateContent();
+    bindings.repaint();
+}
+
+int SettingsOverlay::getNumRows()
+{
+    return static_cast<int> (mapper_.map().bindings.size());
+}
+
+void SettingsOverlay::paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool)
+{
+    const auto& list = mapper_.map().bindings;
+    if (row < 0 || row >= static_cast<int> (list.size()))
+        return;
+    g.setFont (monoFont (12.f));
+    g.setColour (palette::text);
+    g.drawText (MidiMapper::describe (list[static_cast<std::size_t> (row)]), 6, 0, width - 34, height, juce::Justification::centredLeft, true);
+    g.setColour (palette::alarm.withAlpha (0.8f));
+    g.drawText ("x", width - 24, 0, 18, height, juce::Justification::centred, false);
+}
+
+void SettingsOverlay::listBoxItemClicked (int row, const juce::MouseEvent& e)
+{
+    if (e.x >= bindings.getVisibleRowWidth() - 28)
+        mapper_.removeBinding (row);
 }
 
 bool SettingsOverlay::calibrating() const
@@ -98,6 +221,14 @@ void SettingsOverlay::cancelCalibration()
 
 void SettingsOverlay::timerCallback()
 {
+    if (mapper_.version() != shownMapVersion_)
+        refreshMidiMap();
+    if (clearArmedMs_ != 0 && juce::Time::getMillisecondCounter() - clearArmedMs_ >= 3000)
+    {
+        clearArmedMs_ = 0;
+        clearAll.setButtonText ("CLEAR ALL");
+    }
+
     const auto snap = engine_.core().loopSnapshot();
     if (snap.cal != lastCal_)
     {
@@ -164,11 +295,48 @@ void SettingsOverlay::paint (juce::Graphics& g)
 void SettingsOverlay::resized()
 {
     auto r = getLocalBounds().reduced (8);
-    auto midiRow = r.removeFromBottom (28);
-    midiLabel.setBounds (midiRow.removeFromLeft (90));
-    midi.setBounds (midiRow);
-    r.removeFromBottom (8);
+    auto tabs = r.removeFromTop (24);
+    audioTab.setBounds (tabs.removeFromLeft (72));
+    tabs.removeFromLeft (4);
+    midiTab.setBounds (tabs.removeFromLeft (72));
+    r.removeFromTop (8);
 
+    // ---- MIDI page
+    {
+        auto m = r;
+        midiTitle.setBounds (m.removeFromTop (20));
+        auto dev = m.removeFromTop (26);
+        midiLabel.setBounds (dev.removeFromLeft (90));
+        midi.setBounds (dev);
+        m.removeFromTop (6);
+        auto ch = m.removeFromTop (26);
+        channelLabel.setBounds (ch.removeFromLeft (90));
+        channel.setBounds (ch.removeFromLeft (90));
+        ch.removeFromLeft (12);
+        defaultNotes.setBounds (ch.removeFromLeft (200));
+        m.removeFromTop (6);
+        auto lr = m.removeFromTop (26);
+        learn.setBounds (lr.removeFromLeft (80));
+        lr.removeFromLeft (12);
+        midiHint.setBounds (lr);
+        m.removeFromTop (6);
+        auto hit = m.removeFromTop (24);
+        hitLabel.setBounds (hit.removeFromLeft (100));
+        for (auto& b : hitButtons)
+        {
+            b.setBounds (hit.removeFromLeft (28));
+            hit.removeFromLeft (4);
+        }
+        m.removeFromTop (10);
+        auto bt = m.removeFromTop (22);
+        clearAll.setBounds (bt.removeFromRight (90));
+        bindingsTitle.setBounds (bt);
+        m.removeFromTop (4);
+        bindings.setBounds (m);
+    }
+
+    // ---- AUDIO page
+    r.removeFromBottom (0);
     auto fold = r.removeFromBottom (48);
     foldersTitle.setBounds (fold.removeFromTop (20));
     auto frow = fold.removeFromTop (24);

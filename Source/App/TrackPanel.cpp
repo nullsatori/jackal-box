@@ -1,5 +1,7 @@
 #include "TrackPanel.h"
 
+#include "MidiTargets.h"
+
 #include "Model/ParamSpec.h"
 #include "Model/PatternOps.h"
 
@@ -286,7 +288,9 @@ void TrackPanel::refresh()
         knobs[i]->setLocked (locked || held != nullptr);
         if (! knobs[i]->isMouseButtonDown())
             knobs[i]->setValue (value, juce::dontSendNotification);
+        setMidiTarget (*knobs[i], MidiTarget::ofParam (trackParam (c_.selectedTrack(), p)));   // stage 5
     }
+    setMidiTarget (masterGain, MidiTarget::ofParam (masterParam (MasterParam::Gain)));
 
     const auto s = c_.lastTouched();
     const auto& st = c_.editPattern().lanes[static_cast<std::size_t> (s.track)].steps[static_cast<std::size_t> (s.slot)];

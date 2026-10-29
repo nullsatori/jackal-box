@@ -22,6 +22,7 @@ namespace keys
     const juce::String loopManualMs = "loopManualMs";
     const juce::String loopUseMeasured = "loopUseMeasured";
     const juce::String loopCalPrefix = "loopCal.";
+    const juce::String exportFolder = "exportFolder";
 } // namespace keys
 
 AppSettings::AppSettings()
@@ -134,6 +135,9 @@ void AppSettings::setLoopCal (const juce::String& deviceName, int samples)
 }
 
 void AppSettings::setMidiInputId (const juce::String& id)      { set (keys::midiInputId, id); }
+juce::String AppSettings::exportFolder() const                 { return file().getValue (keys::exportFolder); }
+void AppSettings::setExportFolder (const juce::String& path)   { set (keys::exportFolder, path); }
+juce::File AppSettings::folder() const                         { return file().getFile().getParentDirectory(); }
 void AppSettings::setWindowBounds (const juce::String& bounds) { set (keys::windowBounds, bounds); }
 
 } // namespace jackal

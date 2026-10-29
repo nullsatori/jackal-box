@@ -29,8 +29,9 @@ void GlitchPadBar::timerCallback()
     if (++tick_ % 6 == 0)
         blink_ = ! blink_;
 
-    if (s.activePad != shownActive_ || s.pendingPad != shownPending_ || lanePad != shownLane_ || (s.pendingPad >= 0 && tick_ % 6 == 0))
+    if (c_.version() != shownVersion_ || s.activePad != shownActive_ || s.pendingPad != shownPending_ || lanePad != shownLane_ || (s.pendingPad >= 0 && tick_ % 6 == 0))
     {
+        shownVersion_ = c_.version();
         shownActive_ = s.activePad;
         shownPending_ = s.pendingPad;
         shownLane_ = lanePad;
@@ -43,6 +44,12 @@ juce::Rectangle<int> GlitchPadBar::padBounds (int pad) const
     auto r = getLocalBounds().reduced (8, 8);
     const int w = (r.getWidth() - 7 * 8) / kNumPads;
     return { r.getX() + pad * (w + 8), r.getY(), w, r.getHeight() };
+}
+
+juce::String GlitchPadBar::midiTargetAt (juce::Point<int> p) const
+{
+    const int pad = padAt (p);
+    return pad >= 0 ? juce::String (targetToString (MidiTarget::ofAction (ActionId::Pad, pad))) : juce::String();
 }
 
 int GlitchPadBar::padAt (juce::Point<int> p) const
@@ -109,6 +116,7 @@ void GlitchPadBar::paint (juce::Graphics& g)
         g.setColour (palette::dim);
         g.setFont (monoFont (11.f));
         g.drawText (juce::String (i + 1), r.toNearestInt().reduced (4, 4), juce::Justification::centredBottom, false);
+        midifeedback::drawMarks (g, r, juce::String (targetToString (MidiTarget::ofAction (ActionId::Pad, i))));
     }
 }
 

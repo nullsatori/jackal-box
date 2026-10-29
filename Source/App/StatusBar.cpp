@@ -13,6 +13,10 @@ StatusBar::StatusBar (ProjectController& controller, AudioEngine& engine)
     styleButton (settingsButton);
     settingsButton.onClick = [this] { if (onSettings) onSettings(); };
     addAndMakeVisible (settingsButton);
+    styleButton (exportButton);
+    exportButton.setTooltip ("export WAV: master and stems (Ctrl+Shift+E)");
+    exportButton.onClick = [this] { if (onExport) onExport(); };
+    addAndMakeVisible (exportButton);
     startTimerHz (30);
 }
 
@@ -23,6 +27,10 @@ void StatusBar::timerCallback()
     outLevel_ = decay (outLevel_, engine_.core().outputMeter().peak());
     repaint (meterArea_);
     repaint (infoArea_);
+
+    const auto ex = c_.exportState();
+    exportButton.setButtonText (ex.running ? juce::String (juce::roundToInt (ex.fraction * 100.0)) + " %" : juce::String ("EXPORT"));
+    exportButton.setToggleState (ex.running, juce::dontSendNotification);
 }
 
 void StatusBar::paint (juce::Graphics& g)
@@ -48,17 +56,33 @@ void StatusBar::paint (juce::Graphics& g)
     auto info = infoArea_;
     g.setFont (monoFont (12.f));
     const auto midi = engine_.midiInputName();
+    // stage 5: MIDI LED (any event, 120 ms)
+    const auto led = info.removeFromLeft (12).toFloat().withSizeKeepingCentre (6.f, 6.f);
+    g.setColour (midiLed && midiLed() ? palette::neonCyan : palette::ledOff);
+    g.fillEllipse (led);
     g.setColour (palette::dim);
-    g.drawText ("MIDI " + (midi.isEmpty() ? juce::String ("-") : midi), info.removeFromLeft (180), juce::Justification::centredLeft, true);
+    g.drawText ("MIDI " + (midi.isEmpty() ? juce::String ("-") : midi), info.removeFromLeft (170), juce::Justification::centredLeft, true);
 
     g.setColour (palette::text);
     const auto name = c_.projectName() + (c_.isDirty() ? "  *" : "");
     g.drawText (name, info.removeFromLeft (260), juce::Justification::centredLeft, true);
 
     const auto err = c_.lastError();
+    // stage 5: export progress under the status text
+    const auto ex = c_.exportState();
+    if (ex.running)
+    {
+        auto bar = info.removeFromRight (160).toFloat().withSizeKeepingCentre (150.f, 4.f);
+        g.setColour (palette::ledOff);
+        g.fillRect (bar);
+        g.setColour (palette::nixie);
+        g.fillRect (bar.withWidth (bar.getWidth() * static_cast<float> (juce::jlimit (0.0, 1.0, ex.fraction))));
+        info.removeFromRight (8);
+    }
+
     if (err.isNotEmpty())
     {
-        g.setColour (juce::Colour (0xFFFFD23F));
+        g.setColour (c_.statusAlarm() ? palette::alarm : juce::Colour (0xFFFFD23F));
         g.drawText (err, info, juce::Justification::centredLeft, true);
     }
 }
@@ -68,6 +92,8 @@ void StatusBar::resized()
     auto r = getLocalBounds().reduced (6, 0);
     latency.setBounds (r.removeFromLeft (360));
     settingsButton.setBounds (r.removeFromRight (96).reduced (0, 3));
+    r.removeFromRight (4);
+    exportButton.setBounds (r.removeFromRight (64).reduced (0, 3));
     r.removeFromRight (8);
     meterArea_ = r.removeFromRight (80);
     r.removeFromRight (8);
