@@ -81,9 +81,9 @@ TransportBar::TransportBar (ProjectController& controller, EngineCore& c, AppSet
     swing.onValueChange = [this] { c_.setSwing (juce::roundToInt (swing.getValue())); };
     addAndMakeVisible (swing);
 
-    master.setRange (-24.0, 6.0, 0.1);
+    master.setRange (kMasterGainSpec.minValue, kMasterGainSpec.maxValue, 0.1);
     master.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
-    master.setDoubleClickReturnValue (true, -6.0);
+    master.setDoubleClickReturnValue (true, kMasterGainNewProjectDb);
     master.onValueChange = [this] { c_.setMasterGainDb (static_cast<float> (master.getValue())); };
     addAndMakeVisible (master);
 

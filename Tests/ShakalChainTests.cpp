@@ -279,6 +279,7 @@ TEST_CASE ("K4: p-lock of the macro", "[chain]")
 TEST_CASE ("K5: buffer independence across the whole engine", "[chain]")
 {
     auto project = makeDemoProject (kSr);
+    project->masterGainDb = -6.f;   // a new project starts at -40 dB; this test needs an audible level
     const float macros[] = { 0.3f, 0.6f, 0.9f, 1.0f, 0.5f, 0.7f, 0.2f, 1.0f };
     for (int t = 0; t < kNumTracks; ++t)
         project->tracks[static_cast<std::size_t> (t)].params[static_cast<std::size_t> (TrackParam::Shakal)] = macros[t];

@@ -79,8 +79,8 @@ void AppSettings::setAudioDeviceState (const juce::XmlElement* state)
 double AppSettings::bpm() const             { return file().getDoubleValue (keys::bpm, kDefaultBpm); }
 bool AppSettings::metronomeEnabled() const  { return file().getBoolValue (keys::metronomeEnabled, true); }
 float AppSettings::metronomeGain() const    { return static_cast<float> (file().getDoubleValue (keys::metronomeGain, 0.5)); }
-bool AppSettings::monitorEnabled() const    { return file().getBoolValue (keys::monitorEnabled, true); }
-float AppSettings::monitorGainDb() const    { return static_cast<float> (file().getDoubleValue (keys::monitorGainDb, 0.0)); }
+bool AppSettings::monitorEnabled() const    { return file().getBoolValue (keys::monitorEnabled, false); }
+float AppSettings::monitorGainDb() const    { return static_cast<float> (file().getDoubleValue (keys::monitorGainDb, -40.0)); }
 int AppSettings::inputChannel() const       { return file().getIntValue (keys::inputChannel, 0); }
 
 void AppSettings::setBpm (double value)             { set (keys::bpm, value); }

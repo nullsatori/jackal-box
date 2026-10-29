@@ -51,7 +51,7 @@ struct Command
 struct EngineParams
 {
     std::atomic<float> monitorGainDb { 0.f };   // -60..+12, -60 means -inf
-    std::atomic<bool>  monitorEnabled { true };
+    std::atomic<bool>  monitorEnabled { false };   // off until the user turns it on: mic + speakers feed back
     std::atomic<bool>  metronomeEnabled { true };
     std::atomic<float> metronomeGain { 0.5f };  // linear 0..1
 

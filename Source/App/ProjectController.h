@@ -28,7 +28,7 @@ namespace jackal
 // Everything the master edit action snapshots (gain, SHAKAL macro and chain, seed for REROLL).
 struct MasterState
 {
-    float gainDb = kMasterGainDefaultDb;
+    float gainDb = kMasterGainNewProjectDb;
     float shakal = 0.f;
     FxSettings fx {};
     uint32_t seed = 0;

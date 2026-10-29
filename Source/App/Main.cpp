@@ -68,8 +68,10 @@ public:
         const auto savedState = settings->audioDeviceState();
         engine->initialise (savedState.get());
 
-        // monitor settings live in AppSettings (stage 1)
-        engine->core().params().monitorEnabled.store (settings->monitorEnabled());
+        // monitor settings live in AppSettings (stage 1). The monitor always starts off:
+        // with a mic and speakers it feeds back the moment the app opens.
+        settings->setMonitorEnabled (false);
+        engine->core().params().monitorEnabled.store (false);
         engine->core().params().monitorGainDb.store (settings->monitorGainDb());
         engine->core().commands().push ({ CommandType::SetInputChannel, 0.f, settings->inputChannel() });
 

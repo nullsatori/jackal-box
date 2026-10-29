@@ -102,7 +102,7 @@ struct Project
     std::string name = "Untitled";
     double bpm = 172.0;
     uint32_t seed = 0x5A4C;
-    float masterGainDb = kMasterGainDefaultDb;
+    float masterGainDb = kMasterGainNewProjectDb;
     float masterShakal = 0.f;
     FxSettings masterFx {};
     InsertSlots masterInserts {};
