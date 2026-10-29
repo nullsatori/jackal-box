@@ -382,6 +382,23 @@ void Sequencer::process (SequencerContext& ctx) noexcept
     processRange (ctx, b0, b1);
 }
 
+int Sequencer::currentBars() const noexcept
+{
+    return std::clamp<int> (current().bars, 1, kMaxBars);
+}
+
+int Sequencer::currentLoopSlot() const noexcept
+{
+    return current().loopSlot;
+}
+
+double Sequencer::nextCycleStartBeat (double beat) const noexcept
+{
+    const double cycle = static_cast<double> (currentBars() * kBeatsPerBar);
+    const double m = std::floor ((beat - patternStartBeat_) / cycle + 1e-9) + 1.0;
+    return patternStartBeat_ + std::max (0.0, m) * cycle;
+}
+
 void Sequencer::liveHit (SequencerContext& ctx, int track, uint8_t velocity) noexcept
 {
     if (track < 0 || track >= kNumTracks)

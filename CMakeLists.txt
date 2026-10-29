@@ -63,7 +63,26 @@ add_library(jackal_engine STATIC
     Source/Engine/Fx/MacroCurves.h
     Source/Engine/Fx/MacroCurves.cpp
     Source/Engine/Fx/ShakalChain.h
-    Source/Engine/Fx/ShakalChain.cpp)
+    Source/Engine/Fx/ShakalChain.cpp
+    Source/Engine/Inserts/InsertProcessor.h
+    Source/Engine/Inserts/DelayLine.h
+    Source/Engine/Inserts/DelayLine.cpp
+    Source/Engine/Inserts/InsertSlot.h
+    Source/Engine/Inserts/InsertSlot.cpp
+    Source/Engine/Inserts/InsertChain.h
+    Source/Engine/Inserts/InsertChain.cpp
+    Source/Engine/Inserts/Pdc.h
+    Source/Engine/Inserts/Pdc.cpp
+    Source/Engine/Guitar/NoiseGate.h
+    Source/Engine/Guitar/NoiseGate.cpp
+    Source/Engine/Guitar/LoopPlayer.h
+    Source/Engine/Guitar/LoopPlayer.cpp
+    Source/Engine/Guitar/LoopRecorder.h
+    Source/Engine/Guitar/LoopRecorder.cpp
+    Source/Engine/Guitar/Calibrator.h
+    Source/Engine/Guitar/Calibrator.cpp
+    Source/Engine/Guitar/GuitarStrip.h
+    Source/Engine/Guitar/GuitarStrip.cpp)
 
 target_include_directories(jackal_engine PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/Source")
 

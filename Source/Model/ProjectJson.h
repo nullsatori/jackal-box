@@ -9,7 +9,7 @@
 namespace jackal
 {
 
-constexpr int kProjectFormatVersion = 3;
+constexpr int kProjectFormatVersion = 4;
 
 struct ParseResult
 {

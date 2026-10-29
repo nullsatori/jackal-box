@@ -28,7 +28,7 @@ public:
     void prepare (double sampleRate, int maxBlockSize, int chainIndex);
     void reset() noexcept;   // Play / Stop
 
-    // Parameter lock: offset inside the coming block; macro >= 0 sets the override, macro < 0 clears it.
+    // Macro override from a step: offset inside the coming block; macro >= 0 sets the override, macro < 0 clears it.
     void onTrigger (int offset, float macro) noexcept;
     void process (float* left, float* right, int n, const ParamTable&, const Transport&, int64_t blockStart,
                   bool playing, uint32_t seed) noexcept;

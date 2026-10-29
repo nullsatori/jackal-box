@@ -22,7 +22,13 @@ add_executable(jackal_tests
     FxTestHelpers.h
     ShakalEffectTests.cpp
     ShakalChainTests.cpp
-    MacroCurveTests.cpp)
+    MacroCurveTests.cpp
+    FakeInsert.h
+    LoopTestHelpers.h
+    InsertChainTests.cpp
+    LoopRecorderTests.cpp
+    CalibrationTests.cpp
+    GuitarStripTests.cpp)
 
 target_link_libraries(jackal_tests PRIVATE jackal_engine jackal_model Catch2::Catch2WithMain)
 

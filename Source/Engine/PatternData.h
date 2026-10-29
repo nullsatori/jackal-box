@@ -73,6 +73,7 @@ struct Pattern
     uint8_t swing = 50;            // 50..75
     std::array<Lane, kNumTracks> lanes {};
     GlitchLane glitch {};
+    int8_t loopSlot = -1;          // guitar loop of this pattern: -1 none, else 8..15 (stage 4)
     bool operator== (const Pattern&) const = default;
 };
 

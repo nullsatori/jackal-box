@@ -98,6 +98,32 @@ inline float clampTrackParam (TrackParam p, float v) noexcept
     return std::clamp (v, s.minValue, s.maxValue);
 }
 
+// Guitar strip (stage 4), ids guitarParam(...)
+constexpr std::array<ParamSpecEntry, kNumGuitarParams> kGuitarParamSpecs { {
+    { "shakal",     "SHAKAL",  0.f,   1.f, kGuitarParamDefaults[0], "" },
+    { "gateDb",     "GATE",  -80.f,   0.f, kGuitarParamDefaults[1], "dB" },
+    { "hpfHz",      "LOW CUT", 20.f, 300.f, kGuitarParamDefaults[2], "Hz" },
+    { "loopGainDb", "LOOP",  -60.f,  12.f, kGuitarParamDefaults[3], "dB" },
+    { "loopTap",    "TAP",     0.f,   1.f, kGuitarParamDefaults[4], "" },   // 0 DI, 1 AMP
+} };
+
+// Insert slots (stage 4), ids insertParam(chain, slot, ...): bypass 0/1
+constexpr std::array<std::string_view, kSlotsPerChain> kInsertBypassNames { "slot1Bypass", "slot2Bypass" };
+
+inline int guitarParamFromName (std::string_view name) noexcept
+{
+    for (std::size_t i = 0; i < kGuitarParamSpecs.size(); ++i)
+        if (kGuitarParamSpecs[i].name == name)
+            return static_cast<int> (i);
+    return -1;
+}
+
+inline float clampGuitarParam (GuitarParam p, float v) noexcept
+{
+    const auto& s = kGuitarParamSpecs[static_cast<std::size_t> (p)];
+    return std::clamp (v, s.minValue, s.maxValue);
+}
+
 // -1 when the name is unknown
 inline int trackParamFromName (std::string_view name) noexcept
 {
@@ -122,14 +148,26 @@ inline std::string_view paramName (ParamId id) noexcept
         const int p = (id - kFxBase) % kFxStride;
         return p < kNumFxParams ? kFxParamSpecs[static_cast<std::size_t> (p)].name : std::string_view {};
     }
+    if (id >= kGuitarBase && id < kGuitarBase + kNumGuitarParams)
+        return kGuitarParamSpecs[static_cast<std::size_t> (id - kGuitarBase)].name;
+    if (id >= kInsertBase && id < kInsertBase + kNumChains * kSlotsPerChain)
+        return kInsertBypassNames[static_cast<std::size_t> ((id - kInsertBase) % kSlotsPerChain)];
     return {};
 }
 
-// chain 0..7 = track, kMasterChain = master. Track and fx names both resolve; -1 when unknown.
+// chain 0..7 = track, kMasterChain = master, kGuitarChain = guitar. Track and fx names both resolve; -1 when unknown.
 inline int paramIdByName (int chain, std::string_view name) noexcept
 {
+    for (int s = 0; s < kSlotsPerChain; ++s)
+        if (name == kInsertBypassNames[static_cast<std::size_t> (s)])
+            return insertParam (chain, s, InsertParam::Bypass);
     if (const int f = fxParamFromName (name); f >= 0)
         return fxParam (chain, static_cast<FxParam> (f));
+    if (chain == kGuitarChain)
+    {
+        const int g = guitarParamFromName (name);
+        return g >= 0 ? guitarParam (static_cast<GuitarParam> (g)) : -1;
+    }
     if (chain == kMasterChain)
     {
         if (name == kMasterGainSpec.name)   return masterParam (MasterParam::Gain);

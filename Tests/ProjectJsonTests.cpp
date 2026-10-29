@@ -94,9 +94,9 @@ TEST_CASE ("J2: tolerant reading, strict format checks", "[json]")
     REQUIRE (ok.project->patterns[0].lanes[0].steps[3].velocity == 127);
     REQUIRE (ok.project->patterns[0].lanes[0].length == 16);
 
-    // stage 3: version 3 is current, version 4 is the first unknown one
-    REQUIRE (fromJson (R"({"format":"jackal-project","version":3})").ok);
-    auto v4 = fromJson (R"({"format":"jackal-project","version":4})");
+    // stage 4: version 4 is current, version 5 is the first unknown one
+    REQUIRE (fromJson (R"({"format":"jackal-project","version":4})").ok);
+    auto v4 = fromJson (R"({"format":"jackal-project","version":5})");
     REQUIRE (! v4.ok);
     REQUIRE (! v4.error.empty());
     REQUIRE (! fromJson (R"({"format":"other","version":2})").ok);
@@ -104,7 +104,7 @@ TEST_CASE ("J2: tolerant reading, strict format checks", "[json]")
     REQUIRE (! fromJson ("").ok);
 }
 
-TEST_CASE ("J3: version 2 migrates to version 3", "[json]")
+TEST_CASE ("J3: version 2 migrates to the current version", "[json]")
 {
     const char* v2 = R"({"format":"jackal-project","version":2,"name":"Old","bpm":170,"seed":7,"masterGainDb":-6,
         "tracks":[{"name":"KICK","slot":0,"params":{"volume":-2,"shakal":0.7}},{"name":"BREAK","slot":7}],
@@ -122,7 +122,7 @@ TEST_CASE ("J3: version 2 migrates to version 3", "[json]")
     REQUIRE (r.project->tracks[0].params[0] == -2.f);
 
     const auto text = toJson (*r.project);
-    REQUIRE (text.find ("\"version\": 3") != std::string::npos);
+    REQUIRE (text.find ("\"version\": 4") != std::string::npos);
     auto again = fromJson (text);
     REQUIRE (again.ok);
     REQUIRE (again.migratedFrom == 0);
@@ -155,7 +155,7 @@ TEST_CASE ("J4: version 3 SHAKAL settings roundtrip", "[json]")
     }
     fill (p->masterFx, 8);
     p->masterShakal = 0.375f;
-    p->ui.trackPanelTab = 3;
+    p->ui.trackPanelTab = 4;
     p->patterns[0].lanes[7].steps[6].active = true;
     p->patterns[0].lanes[7].steps[6].plocks[0] = { static_cast<uint8_t> (TrackParam::Shakal), 1.f };
 
@@ -172,10 +172,102 @@ TEST_CASE ("J4: version 3 SHAKAL settings roundtrip", "[json]")
     REQUIRE (odd.project->tracks[0].fx.params[static_cast<std::size_t> (FxParam::CrushBits)] == 16.f);
     REQUIRE (odd.project->tracks[0].fx.params[static_cast<std::size_t> (FxParam::DriveMode)] == 0.f);
 
-    REQUIRE (! fromJson (R"({"format":"jackal-project","version":4})").ok);
+    REQUIRE (! fromJson (R"({"format":"jackal-project","version":5})").ok);   // stage 4: 4 reads, 5 is unknown
+    REQUIRE (fromJson (R"({"format":"jackal-project","version":4})").ok);
 
     auto bare = fromJson (R"({"format":"jackal-project","version":3,"tracks":[{"name":"X"}]})");
     REQUIRE (bare.ok);
     REQUIRE (bare.project->tracks[0].fx == FxSettings {});
     REQUIRE (bare.project->masterFx == FxSettings {});
+}
+
+TEST_CASE ("J5: versions 2 and 3 migrate to version 4", "[json]")
+{
+    const char* v3 = R"({"format":"jackal-project","version":3,"name":"Three","bpm":172,"masterShakal":0.25,
+        "tracks":[{"name":"KICK","slot":0,"fx":{"preset":"net"}}],
+        "patterns":[{"bars":1,"loopSlot":8,"lanes":[{"steps":[{"i":0}]}]}],
+        "ui":{"trackPanelTab":2}})";
+    const char* v2 = R"({"format":"jackal-project","version":2,"name":"Two","patterns":[{"bars":2}]})";
+    for (const char* text : { v3, v2 })
+    {
+        auto r = fromJson (text);
+        REQUIRE (r.ok);
+        REQUIRE (r.migratedFrom == (text == v3 ? 3 : 2));
+        for (const auto& t : r.project->tracks)
+            REQUIRE (t.inserts == InsertSlots {});
+        REQUIRE (r.project->masterInserts == InsertSlots {});
+        REQUIRE (r.project->guitar == GuitarSettings {});
+        for (const auto& pat : r.project->patterns)
+            REQUIRE (pat.loopSlot == -1);   // v3 had no loops, a stray field is ignored
+        if (text == v3)
+            REQUIRE (r.project->ui.trackPanelTab == 3);   // STEP moved behind VST
+
+        const auto out = toJson (*r.project);
+        REQUIRE (out.find ("\"version\": 4") != std::string::npos);
+        auto again = fromJson (out);
+        REQUIRE (again.ok);
+        REQUIRE (again.migratedFrom == 0);
+        REQUIRE (*again.project == *r.project);
+    }
+}
+
+TEST_CASE ("J6: version 4 round trip", "[json]")
+{
+    auto p = std::make_unique<Project>();
+    auto slot = [] (int k, bool bypass) {
+        return InsertSlotSpec { "VST3-Plug" + std::to_string (k) + "-abc", "Plug " + std::to_string (k),
+                                "AAEC" + std::to_string (k) + "==", bypass };
+    };
+    for (int t = 0; t < kNumTracks; ++t)
+    {
+        p->tracks[static_cast<std::size_t> (t)].inserts[0] = slot (t, t == 2);
+        if (t % 2 == 0)
+            p->tracks[static_cast<std::size_t> (t)].inserts[1] = slot (100 + t, false);
+    }
+    p->masterInserts[1] = slot (50, false);
+    p->guitar.shakal = 0.3f;
+    p->guitar.fx.preset = 2;
+    p->guitar.fx.params[static_cast<std::size_t> (FxParam::CrushOn)] = 1.f;
+    p->guitar.gateDb = -48.f;
+    p->guitar.hpfHz = 80.f;
+    p->guitar.loopGainDb = -3.f;
+    p->guitar.inserts[0] = slot (60, false);
+    p->guitar.inserts[1] = slot (61, true);
+    p->slots[8] = { "loop", "loops/8-3.wav", SliceMode::Off, 1.0, {}, true };
+    p->slots[9] = { "loop", "loops/9-1.wav", SliceMode::Grid16, 2.0, {}, true };
+    p->patterns[0].loopSlot = 8;
+    p->patterns[1].loopSlot = 9;
+
+    for (LoopTap tap : { LoopTap::Di, LoopTap::Amp })
+    {
+        p->guitar.loopTap = tap;
+        const auto text = toJson (*p);
+        auto r = fromJson (text);
+        REQUIRE (r.ok);
+        REQUIRE (r.migratedFrom == 0);
+        REQUIRE (*r.project == *p);
+        REQUIRE (toJson (*r.project) == text);
+    }
+
+    auto odd = fromJson (R"({"format":"jackal-project","version":4,
+        "guitar":{"gateDb":-200,"hpfHz":5000,"loopTap":"wah"},
+        "patterns":[{"loopSlot":3},{"loopSlot":20},{"loopSlot":15}],
+        "masterInserts":[{"name":"no id"},{"id":"VST3-x","name":"X"}]})");
+    REQUIRE (odd.ok);
+    REQUIRE (odd.project->guitar.gateDb == -80.f);
+    REQUIRE (odd.project->guitar.hpfHz == 300.f);
+    REQUIRE (odd.project->guitar.loopTap == LoopTap::Amp);
+    REQUIRE (odd.project->patterns[0].loopSlot == -1);
+    REQUIRE (odd.project->patterns[1].loopSlot == -1);
+    REQUIRE (odd.project->patterns[2].loopSlot == 15);
+    REQUIRE (odd.project->masterInserts[0].empty());
+    REQUIRE (odd.project->masterInserts[1].name == "X");
+
+    auto v5 = fromJson (R"({"format":"jackal-project","version":5})");
+    REQUIRE (! v5.ok);
+    REQUIRE (v5.error.find ("5") != std::string::npos);
+
+    auto noGuitar = fromJson (R"({"format":"jackal-project","version":4})");
+    REQUIRE (noGuitar.ok);
+    REQUIRE (noGuitar.project->guitar == GuitarSettings {});
 }

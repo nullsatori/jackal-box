@@ -8,10 +8,12 @@
 #include "Model/Project.h"
 #include "Model/Slicer.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <set>
 #include <vector>
 
 namespace jackal::test
@@ -74,6 +76,10 @@ struct OfflineRig
     std::vector<EngineEvent> events;
     int retiredCount = 0;
     std::vector<const void*> retiredPtrs;
+    std::vector<int64_t> eventBlocks;                 // block start of each entry in `events`
+    std::set<const Sample*> retiredSamples;           // deleted in the destructor (a test may republish one)
+    // Optional live input, one channel: fills `in` for the block [pos, pos + n). Never a device, never a sound.
+    std::function<void (int64_t pos, int n, float* in)> input;
 
     explicit OfflineRig (int buffer = 128, double sr = 48000.0, int maxBlock = -1)
         : sampleRate (sr), bufferSize (buffer)
@@ -87,6 +93,8 @@ struct OfflineRig
     {
         core.releaseAll();
         drain();
+        for (const Sample* smp : retiredSamples)
+            delete smp;
     }
 
     void cmd (CommandType t, int ivalue = 0, float value = 0.f, const void* ptr = nullptr)
@@ -107,7 +115,7 @@ struct OfflineRig
     void param (int track, TrackParam p, float v) { core.params().params.set (trackParam (track, p), v); }
     void masterGainDb (float db) { core.params().params.set (masterParam (MasterParam::Gain), db); }
 
-    void drain()
+    void drain (int64_t blockStart = -1)
     {
         Retired r;
         while (core.retired().pop (r))
@@ -116,12 +124,21 @@ struct OfflineRig
             retiredPtrs.push_back (r.ptr);
             if (r.kind == Retired::Kind::Pattern)
                 delete static_cast<const Pattern*> (r.ptr);
-            else
-                delete static_cast<const Sample*> (r.ptr);
+            else if (r.kind == Retired::Kind::Sample)
+                retiredSamples.insert (static_cast<const Sample*> (r.ptr));
+            // Insert: the test owns its FakeInsert objects
         }
         EngineEvent e;
         while (core.events().pop (e))
+        {
             events.push_back (e);
+            eventBlocks.push_back (blockStart);
+        }
+    }
+
+    int countRetired (const void* p) const
+    {
+        return static_cast<int> (std::count (retiredPtrs.begin(), retiredPtrs.end(), p));
     }
 
     int64_t position() const { return static_cast<int64_t> (left.size()); }
@@ -129,17 +146,28 @@ struct OfflineRig
     // Renders until the total output reaches `endSample`, in blocks of bufferSize (the last one clipped).
     void renderUntil (int64_t endSample, const std::function<void (int64_t)>& beforeBlock = {})
     {
-        std::vector<float> l (static_cast<std::size_t> (bufferSize)), r (l.size());
+        std::vector<float> l (static_cast<std::size_t> (bufferSize)), r (l.size()), inBuf (l.size());
         float* out[2] = { l.data(), r.data() };
+        const float* in[1] = { inBuf.data() };
         while (position() < endSample)
         {
             if (beforeBlock)
                 beforeBlock (position());
-            const int n = static_cast<int> (std::min<int64_t> (bufferSize, endSample - position()));
-            core.process (nullptr, 0, out, 2, n);
+            const int64_t start = position();
+            const int n = static_cast<int> (std::min<int64_t> (bufferSize, endSample - start));
+            if (input)
+            {
+                std::fill (inBuf.begin(), inBuf.end(), 0.f);
+                input (start, n, inBuf.data());
+                core.process (in, 1, out, 2, n);
+            }
+            else
+            {
+                core.process (nullptr, 0, out, 2, n);
+            }
             left.insert (left.end(), l.begin(), l.begin() + n);
             right.insert (right.end(), r.begin(), r.begin() + n);
-            drain();
+            drain (start);
         }
     }
 

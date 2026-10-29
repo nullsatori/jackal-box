@@ -137,7 +137,10 @@ void ShakalChain::process (float* left, float* right, int n, const ParamTable& p
     const bool bypass = fxFlag (params.get (fxParam (chain_, FxParam::Bypass)));
     const auto preset = static_cast<ShakalPreset> (std::clamp<long> (std::lround (params.get (fxParam (chain_, FxParam::Preset))), 0, 2));
     const FxState manual = manualFxState (params, chain_);
-    const float knob = params.get (chain_ == kMasterChain ? masterParam (MasterParam::Shakal) : trackParam (chain_, TrackParam::Shakal));
+    const ParamId knobId = chain_ == kMasterChain ? masterParam (MasterParam::Shakal)
+                         : chain_ == kGuitarChain ? guitarParam (GuitarParam::Shakal)
+                                                  : trackParam (chain_, TrackParam::Shakal);
+    const float knob = params.get (knobId);
 
     FxContext ctx;
     ctx.sampleRate = sampleRate_;

@@ -105,7 +105,12 @@ struct FxRig
     }
 
     void setManual (FxParam p, float v) { table.set (fxParam (chain, p), v); }
-    void setMacro (float v) { table.set (chain == kMasterChain ? masterParam (MasterParam::Shakal) : trackParam (chain, TrackParam::Shakal), v); }
+    void setMacro (float v)
+    {
+        table.set (chain == kMasterChain ? masterParam (MasterParam::Shakal)
+                   : chain == kGuitarChain ? guitarParam (GuitarParam::Shakal)
+                                           : trackParam (chain, TrackParam::Shakal), v);
+    }
     void setPreset (ShakalPreset p) { setManual (FxParam::Preset, static_cast<float> (p)); }
     void setBypass (bool b) { setManual (FxParam::Bypass, b ? 1.f : 0.f); }
     void trigger (int64_t sample, float macro) { triggers.push_back ({ sample, macro }); }

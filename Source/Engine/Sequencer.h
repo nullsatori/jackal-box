@@ -63,6 +63,13 @@ public:
     int laneSlot (int track) const noexcept { return lastSlot_[static_cast<std::size_t> (track)]; }
     int glitchSlot() const noexcept { return glitchSlot_; }
 
+    // stage 4: loop recorder and player
+    double patternStartBeat() const noexcept { return patternStartBeat_; }
+    int currentBars() const noexcept;
+    int currentLoopSlot() const noexcept;
+    // First pattern-cycle start strictly after `beat` (a boundary exactly at `beat` counts as passed).
+    double nextCycleStartBeat (double beat) const noexcept;
+
 private:
     struct RollState
     {

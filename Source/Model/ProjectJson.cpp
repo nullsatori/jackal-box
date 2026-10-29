@@ -177,6 +177,77 @@ namespace
         return f;
     }
 
+    // ---- insert slots and the guitar strip (v4)
+
+    Json insertsToJson (const InsertSlots& slots)
+    {
+        Json a = Json::array();
+        for (const auto& sl : slots)
+        {
+            Json o = Json::object();   // empty slot is {}
+            if (! sl.empty())
+            {
+                o["id"] = sl.identifier;
+                o["name"] = sl.name;
+                o["state"] = sl.stateBase64;
+                o["bypass"] = sl.bypass;
+            }
+            a.push_back (std::move (o));
+        }
+        return a;
+    }
+
+    InsertSlots insertsFromJson (const Json& o, const char* key)
+    {
+        InsertSlots slots {};
+        if (const Json* a = arr (o, key))
+        {
+            std::size_t i = 0;
+            for (const auto& e : *a)
+            {
+                if (i >= slots.size())
+                    break;
+                auto& sl = slots[i++];
+                if (! e.is_object())
+                    continue;
+                sl.identifier = str (e, "id", "");
+                if (sl.identifier.empty())
+                    continue;
+                sl.name = str (e, "name", "");
+                sl.stateBase64 = str (e, "state", "");
+                sl.bypass = flag (e, "bypass", false);
+            }
+        }
+        return slots;
+    }
+
+    float guitarNum (const Json& o, GuitarParam p)
+    {
+        const auto& spec = kGuitarParamSpecs[static_cast<std::size_t> (p)];
+        return num<float> (o, std::string (spec.name).c_str(), spec.defaultValue, spec.minValue, spec.maxValue);
+    }
+
+    Json guitarToJson (const GuitarSettings& g)
+    {
+        return { { "shakal", g.shakal }, { "fx", fxToJson (g.fx) }, { "gateDb", g.gateDb }, { "hpfHz", g.hpfHz },
+                 { "loopGainDb", g.loopGainDb }, { "loopTap", g.loopTap == LoopTap::Di ? "di" : "amp" },
+                 { "inserts", insertsToJson (g.inserts) } };
+    }
+
+    GuitarSettings guitarFromJson (const Json& o)
+    {
+        GuitarSettings g;
+        g.shakal = guitarNum (o, GuitarParam::Shakal);
+        if (const Json* fx = obj (o, "fx"))
+            g.fx = fxFromJson (*fx);
+        g.gateDb = guitarNum (o, GuitarParam::GateDb);
+        g.hpfHz = guitarNum (o, GuitarParam::HpfHz);
+        g.loopGainDb = guitarNum (o, GuitarParam::LoopGainDb);
+        g.loopTap = str (o, "loopTap", "amp") == "di" ? LoopTap::Di : LoopTap::Amp;
+        g.inserts = insertsFromJson (o, "inserts");
+        return g;
+    }
+
     // ---- writing
 
     Json stepToJson (const Step& s, int index)
@@ -250,6 +321,8 @@ std::string toJson (const Project& p)
     j["masterGainDb"] = p.masterGainDb;
     j["masterShakal"] = p.masterShakal;
     j["masterFx"] = fxToJson (p.masterFx);
+    j["masterInserts"] = insertsToJson (p.masterInserts);
+    j["guitar"] = guitarToJson (p.guitar);
 
     Json slots = Json::array();
     for (const auto& s : p.slots)
@@ -278,7 +351,7 @@ std::string toJson (const Project& p)
 
         tracks.push_back ({ { "name", t.name }, { "slot", t.sampleSlot }, { "choke", t.chokeGroup },
                             { "fit", t.fitToTempo }, { "mute", t.mute }, { "solo", t.solo }, { "params", std::move (params) },
-                            { "fx", fxToJson (t.fx) } });
+                            { "fx", fxToJson (t.fx) }, { "inserts", insertsToJson (t.inserts) } });
     }
     j["tracks"] = std::move (tracks);
 
@@ -303,7 +376,8 @@ std::string toJson (const Project& p)
         for (int i = 0; i < cells; ++i)
             glitch.push_back (pat.glitch.pad[static_cast<std::size_t> (i)]);
 
-        patterns.push_back ({ { "bars", pat.bars }, { "swing", pat.swing }, { "lanes", std::move (lanes) }, { "glitch", std::move (glitch) } });
+        patterns.push_back ({ { "bars", pat.bars }, { "swing", pat.swing }, { "lanes", std::move (lanes) }, { "glitch", std::move (glitch) },
+                              { "loopSlot", pat.loopSlot } });
     }
     j["patterns"] = std::move (patterns);
 
@@ -360,6 +434,12 @@ ParseResult fromJson (std::string_view text)
         if (const Json* mf = obj (j, "masterFx"))
             p->masterFx = fxFromJson (*mf);
     }
+    if (version >= 4)
+    {
+        p->masterInserts = insertsFromJson (j, "masterInserts");
+        if (const Json* g = obj (j, "guitar"))
+            p->guitar = guitarFromJson (*g);
+    }
 
     if (const Json* slots = arr (j, "slots"))
     {
@@ -409,6 +489,8 @@ ParseResult fromJson (std::string_view text)
                 t.params[static_cast<std::size_t> (TrackParam::Shakal)] = 0.f;   // v2 had no SHAKAL: clean sound
             else if (const Json* fx = obj (o, "fx"))
                 t.fx = fxFromJson (*fx);
+            if (version >= 4)
+                t.inserts = insertsFromJson (o, "inserts");
         }
     }
 
@@ -424,6 +506,11 @@ ParseResult fromJson (std::string_view text)
                 continue;
             pat.bars = num<uint8_t> (o, "bars", 1, 1, kMaxBars);
             pat.swing = num<uint8_t> (o, "swing", 50, kMinSwing, kMaxSwing);
+            if (version >= 4)
+            {
+                const int ls = num<int> (o, "loopSlot", -1, -1000, 1000);
+                pat.loopSlot = static_cast<int8_t> ((ls >= 8 && ls < kNumSampleSlots) ? ls : -1);
+            }
 
             if (const Json* lanes = arr (o, "lanes"))
             {
@@ -468,7 +555,9 @@ ParseResult fromJson (std::string_view text)
         p->ui.currentPattern = num<int> (*ui, "currentPattern", 0, 0, kNumPatterns - 1);
         p->ui.gridPage = num<int> (*ui, "gridPage", 0, 0, 3);
         p->ui.mutationStrength = num<float> (*ui, "mutationStrength", 0.5f, 0.f, 1.f);
-        p->ui.trackPanelTab = num<int> (*ui, "trackPanelTab", 0, 0, 3);
+        p->ui.trackPanelTab = num<int> (*ui, "trackPanelTab", 0, 0, 5);
+        if (version < 4)   // v3 tabs SRC FX STEP MST; v4 inserts VST after FX and adds GTR
+            p->ui.trackPanelTab = std::array<int, 6> { 0, 1, 3, 4, 4, 4 }[static_cast<std::size_t> (std::clamp (p->ui.trackPanelTab, 0, 3))];
     }
 
     result.ok = true;

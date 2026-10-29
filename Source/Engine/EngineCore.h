@@ -4,7 +4,9 @@
 #include "EngineTypes.h"
 #include "Fx/ShakalChain.h"
 #include "GlitchProcessor.h"
-#include "InputMonitor.h"
+#include "Guitar/GuitarStrip.h"
+#include "Inserts/InsertChain.h"
+#include "Inserts/Pdc.h"
 #include "LevelMeter.h"
 #include "Metronome.h"
 #include "SampleBank.h"
@@ -40,6 +42,9 @@ public:
     TransportState transportSnapshot() const noexcept;
     SequencerSnapshot sequencerSnapshot() const noexcept;
     ShakalSnapshot shakalSnapshot() const noexcept;
+    LoopSnapshot loopSnapshot() const noexcept;
+    InsertChain& insertChain (int chain) noexcept { return inserts_[static_cast<std::size_t> (chain)]; }
+    const SampleBank& bank() const noexcept { return bank_; }   // tests read slots; the app never does
 
     // Test builds only: skip steps 7a and 9a (regression E2). Never used by the app.
     void setFxDisabledForTests (bool off) noexcept { fxDisabled_ = off; }
@@ -52,6 +57,9 @@ private:
     void processBlock (const float* const* in, int numIn, float* const* out, int numOut, int numSamples) noexcept;
     void applyCommand (const Command& command, SequencerContext& ctx) noexcept;
     void publishSnapshot() noexcept;
+    void handleLoopResult (const LoopResult&) noexcept;
+    void retireSample (const Sample*) noexcept;
+    void playResets() noexcept;
 
     CommandQueue commands_;
     MidiQueue midi_;
@@ -61,7 +69,16 @@ private:
 
     Transport transport_;
     Metronome metronome_;
-    InputMonitor monitor_;
+    GuitarStrip strip_;
+    LoopRecorder recorder_;
+    LoopPlayer loopPlayer_;
+    Calibrator calibrator_;
+    std::array<InsertChain, kNumChains> inserts_ {};
+    Pdc pdc_;
+    LoopPatternInfo lastLoopInfo_ {};
+    const Sample* pendingRetire_ = nullptr;
+    int lTracks_ = 0, lMaster_ = 0, lGuitar_ = 0;
+    bool pdcOverflow_ = false;
     LevelMeter inputMeter_;
     LevelMeter outputMeter_;
 
@@ -94,6 +111,11 @@ private:
     std::array<std::atomic<float>, kNumChains> snapMacro_ {};
     std::array<std::atomic<uint8_t>, kNumChains> snapEngaged_ {};
     std::atomic<uint16_t> snapOverride_ { 0 };
+    // LoopSnapshot fields, one atomic each
+    std::atomic<int> snapLoopState_ { 0 }, snapLoopSlot_ { -1 }, snapLoopBars_ { 0 }, snapCal_ { 0 };
+    std::atomic<bool> snapLoopOverdub_ { false }, snapPdcOverflow_ { false };
+    std::atomic<int64_t> snapLoopStart_ { 0 }, snapLoopLength_ { 0 }, snapRecIndex_ { -1 }, snapPlayIndex_ { -1 };
+    std::atomic<int32_t> snapComp_ { 0 }, snapPdcTracks_ { 0 }, snapPdcMaster_ { 0 }, snapPdcGuitar_ { 0 }, snapCalSamples_ { -1 };
 };
 
 } // namespace jackal
