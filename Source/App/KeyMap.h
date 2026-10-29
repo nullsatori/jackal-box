@@ -19,7 +19,8 @@ enum CommandId : juce::CommandID
     patternBase = 0x2300,     // + 0..7: queue pattern A..H
     rowUp = 0x2400, rowDown, shiftLeft, shiftRight, nudgeLeft, nudgeRight, pageUp, pageDown,
     doubleLen, mutateCmd, undoCmd, redoCmd, redoAlt,
-    saveCmd, saveAsCmd, openCmd, newCmd, closeOverlay, deletePLocks
+    saveCmd, saveAsCmd, openCmd, newCmd, closeOverlay, deletePLocks,
+    nextTab   // stage 3: Tab cycles SRC / FX / STEP / MST
 };
 
 constexpr std::array<char, 16> kStepKeys { 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K' };

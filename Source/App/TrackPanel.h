@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ProjectController.h"
+#include "ShakalSection.h"
 #include "WaveformView.h"
 #include "Widgets.h"
 
@@ -12,7 +13,8 @@
 namespace jackal
 {
 
-// The selected track: sample, slicing, knobs, and the step inspector (last touched step).
+// Right panel with tabs: SRC (sample, slicing, knobs), FX (SHAKAL of the selected track),
+// STEP (inspector of the last touched step), MST (master SHAKAL and gain).
 class TrackPanel : public juce::Component, private juce::Timer
 {
 public:
@@ -26,6 +28,14 @@ private:
     void refresh();
     void openFileChooser();
     void editStep (const std::function<void (Step&)>& fn);
+    void showTab (int tab);
+    void layoutSrc (juce::Rectangle<int>);
+    void layoutStep (juce::Rectangle<int>);
+    std::vector<juce::Component*> srcComponents();
+    std::vector<juce::Component*> stepComponents();
+
+    std::array<juce::TextButton, 4> tabs { juce::TextButton ("SRC"), juce::TextButton ("FX"), juce::TextButton ("STEP"), juce::TextButton ("MST") };
+    int shownTab_ = -1;
 
     ProjectController& c_;
     juce::TextEditor name;
@@ -42,6 +52,10 @@ private:
     juce::ToggleButton reverse { "REV" };
     juce::ComboBox condition;
     std::array<juce::TextButton, kMaxPlocksPerStep> plockButtons;
+
+    ShakalSection fx, mst;
+    Knob masterGain;
+    juce::Label masterGainLabel;
 
     std::unique_ptr<juce::FileChooser> chooser;
     uint32_t shownVersion_ = 0;

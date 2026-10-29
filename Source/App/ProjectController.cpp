@@ -63,6 +63,25 @@ namespace
         TrackSettings before, after;
     };
 
+    struct MasterAction : juce::UndoableAction
+    {
+        MasterAction (ProjectController& c, MasterState b, MasterState a) : controller (c), before (std::move (b)), after (std::move (a)) {}
+
+        bool perform() override { controller.applyMaster (after); return true; }
+        bool undo() override { controller.applyMaster (before); return true; }
+        int getSizeInUnits() override { return kUndoUnitsPerAction; }
+
+        juce::UndoableAction* createCoalescedAction (juce::UndoableAction* next) override
+        {
+            if (auto* n = dynamic_cast<MasterAction*> (next); n != nullptr)
+                return new MasterAction (controller, before, n->after);
+            return nullptr;
+        }
+
+        ProjectController& controller;
+        MasterState before, after;
+    };
+
     struct SlotAction : juce::UndoableAction
     {
         SlotAction (ProjectController& c, int s, SampleSlotSpec b, SampleSlotSpec a)
@@ -398,11 +417,112 @@ void ProjectController::setBpm (double bpm)
     markDirty();
 }
 
+// ---------------------------------------------------------------------------- SHAKAL
+
+MasterState ProjectController::masterState() const
+{
+    return { project_->masterGainDb, project_->masterShakal, project_->masterFx, project_->seed };
+}
+
+void ProjectController::editMaster (const std::function<void (MasterState&)>& fn)
+{
+    const MasterState before = masterState();
+    MasterState after = before;
+    fn (after);
+    if (after == before)
+        return;
+    undo_.perform (new MasterAction (*this, before, after));
+}
+
+void ProjectController::applyMaster (const MasterState& m)
+{
+    const bool seedChanged = m.seed != project_->seed;
+    project_->masterGainDb = m.gainDb;
+    project_->masterShakal = m.shakal;
+    project_->masterFx = m.fx;
+    project_->seed = m.seed;
+    pushMaster();
+    if (seedChanged)
+        engine_.core().commands().push ({ CommandType::SetSeed, 0.f, static_cast<int32_t> (project_->seed) });
+    markDirty();
+}
+
 void ProjectController::setMasterGainDb (float db)
 {
-    project_->masterGainDb = juce::jlimit (kMasterGainSpec.minValue, kMasterGainSpec.maxValue, db);
-    engine_.core().params().params.set (masterParam (MasterParam::Gain), project_->masterGainDb);
+    db = juce::jlimit (kMasterGainSpec.minValue, kMasterGainSpec.maxValue, db);
+    editMaster ([db] (MasterState& m) { m.gainDb = db; });
+}
+
+const FxSettings& ProjectController::fxSettings (int chain) const
+{
+    return chain >= 0 && chain < kNumTracks ? project_->tracks[idx (chain)].fx : project_->masterFx;
+}
+
+float ProjectController::shakalValue (int chain) const
+{
+    return chain >= 0 && chain < kNumTracks ? project_->tracks[idx (chain)].params[idx (static_cast<int> (TrackParam::Shakal))]
+                                            : project_->masterShakal;
+}
+
+void ProjectController::setFx (int chain, FxParam p, float value)
+{
+    auto apply = [p, value] (FxSettings& fx) {
+        if (p == FxParam::Bypass)
+            fx.bypass = value >= 0.5f;
+        else if (p == FxParam::Preset)
+            fx.preset = static_cast<int8_t> (juce::jlimit (0, 2, juce::roundToInt (value)));
+        else
+            fx.params[static_cast<std::size_t> (p)] = clampFxParam (p, value);
+    };
+
+    if (chain >= 0 && chain < kNumTracks)
+    {
+        if (plockTarget_.has_value())
+            setStatus ("p-lock only on SHAKAL");
+        editTrack (chain, [&] (TrackSettings& t) { apply (t.fx); });
+    }
+    else
+        editMaster ([&] (MasterState& m) { apply (m.fx); });
+}
+
+void ProjectController::setShakal (int chain, float value)
+{
+    value = juce::jlimit (0.f, 1.f, value);
+    if (chain >= 0 && chain < kNumTracks)
+        setTrackParam (chain, TrackParam::Shakal, value);
+    else
+        editMaster ([value] (MasterState& m) { m.shakal = value; });
+}
+
+void ProjectController::reroll()
+{
+    std::random_device rd;
+    const uint32_t seed = rd();
+    beginGesture ("Reroll");
+    editMaster ([seed] (MasterState& m) { m.seed = seed; });
+}
+
+void ProjectController::setTrackPanelTab (int tab)
+{
+    project_->ui.trackPanelTab = ((tab % 4) + 4) % 4;
     markDirty();
+}
+
+void ProjectController::pushFx (int chain, const FxSettings& fx)
+{
+    auto& table = engine_.core().params().params;
+    for (int p = 0; p < kNumFxParams; ++p)
+        table.set (fxParam (chain, static_cast<FxParam> (p)), fx.params[idx (p)]);
+    table.set (fxParam (chain, FxParam::Bypass), fx.bypass ? 1.f : 0.f);
+    table.set (fxParam (chain, FxParam::Preset), static_cast<float> (fx.preset));
+}
+
+void ProjectController::pushMaster()
+{
+    auto& table = engine_.core().params().params;
+    table.set (masterParam (MasterParam::Gain), project_->masterGainDb);
+    table.set (masterParam (MasterParam::Shakal), project_->masterShakal);
+    pushFx (kMasterChain, project_->masterFx);
 }
 
 void ProjectController::setMutationStrength (float s)
@@ -510,6 +630,7 @@ void ProjectController::pushTrack (int track)
     const auto& t = project_->tracks[idx (track)];
     for (int p = 0; p < kNumTrackParams; ++p)
         core.params().params.set (trackParam (track, static_cast<TrackParam> (p)), t.params[idx (p)]);
+    pushFx (track, t.fx);
     core.params().trackMute[idx (track)].store (t.mute);
     core.params().trackSolo[idx (track)].store (t.solo);
     core.commands().push ({ CommandType::SetTrackSlot, 0.f, track | ((t.sampleSlot < 0 ? 0xFF : t.sampleSlot) << 8) });
@@ -524,7 +645,7 @@ void ProjectController::pushAll()
     core.commands().push ({ CommandType::SetBpm, static_cast<float> (project_->bpm), 0 });
     core.commands().push ({ CommandType::SetSeed, 0.f, static_cast<int32_t> (project_->seed) });
     core.commands().push ({ CommandType::QueuePattern, 0.f, project_->ui.currentPattern });
-    core.params().params.set (masterParam (MasterParam::Gain), project_->masterGainDb);
+    pushMaster();
 
     for (int t = 0; t < kNumTracks; ++t)
         pushTrack (t);
@@ -763,7 +884,13 @@ bool ProjectController::openProject (const juce::File& folder)
 
     if (dirty_ && folder_ != folder)
         save();
+    const int migrated = parsed.migratedFrom;
     takeProject (std::move (parsed.project), folder);
+    if (migrated != 0)
+    {
+        dirty_ = true;   // autosave writes the current version
+        setStatus ("project upgraded to v" + juce::String (kProjectFormatVersion));
+    }
     return true;
 }
 

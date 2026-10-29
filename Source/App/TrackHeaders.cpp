@@ -32,9 +32,13 @@ TrackHeaders::Row::Row (ProjectController& controller, int t)
     addAndMakeVisible (volume);
 
     shakal.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
-    shakal.setRange (0.0, 1.0, 0.01);
-    shakal.setEnabled (false);
-    shakal.setTooltip ("SHAKAL: stage 3");
+    shakal.setRange (0.0, 1.0, 0.0);
+    shakal.setDoubleClickReturnValue (true, 0.0);
+    shakal.setTooltip ("SHAKAL (hold a step and turn: p-lock)");
+    shakal.onValueChange = [this] {
+        if (! refreshing)
+            c.setShakal (track, static_cast<float> (shakal.getValue()));
+    };
     addAndMakeVisible (shakal);
 
     refresh();
@@ -47,6 +51,21 @@ void TrackHeaders::Row::refresh()
     solo.setToggleState (t.solo, juce::dontSendNotification);
     if (! volume.isMouseButtonDown())
         volume.setValue (t.params[static_cast<std::size_t> (TrackParam::Volume)], juce::dontSendNotification);
+
+    const juce::ScopedValueSetter<bool> guard (refreshing, true);
+    float value = t.params[static_cast<std::size_t> (TrackParam::Shakal)];
+    bool held = false;
+    if (const auto hold = c.plockTarget(); hold && hold->track == track)
+    {
+        held = true;
+        const auto& st = c.editPattern().lanes[static_cast<std::size_t> (track)].steps[static_cast<std::size_t> (hold->slot)];
+        for (const auto& pl : st.plocks)
+            if (pl.param == static_cast<uint8_t> (TrackParam::Shakal))
+                value = pl.value;
+    }
+    shakal.setLocked (held);
+    if (! shakal.isMouseButtonDown())
+        shakal.setValue (value, juce::dontSendNotification);
     repaint();
 }
 
@@ -123,6 +142,13 @@ void TrackHeaders::timerCallback()
         }
         if (changed)
             row.refresh();
+
+        const bool ring = (c_.shakalSnapshot().overrideMask >> t) & 1u;
+        if (static_cast<bool> (row.shakal.getProperties()[JackalLookAndFeel::ringProperty]) != ring)
+        {
+            row.shakal.getProperties().set (JackalLookAndFeel::ringProperty, ring);
+            row.shakal.repaint();
+        }
     }
 }
 

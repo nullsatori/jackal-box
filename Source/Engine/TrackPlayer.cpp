@@ -18,6 +18,7 @@ void TrackPlayer::reset() noexcept
     for (auto& v : voices_)
         v.kill();
     numEvents_ = 0;
+    numMarks_ = 0;
 }
 
 bool TrackPlayer::trigger (int offset, const TriggerParams& params) noexcept
@@ -58,7 +59,7 @@ void TrackPlayer::killSample (const Sample* sample) noexcept
             events_[static_cast<std::size_t> (i)].params.sample = nullptr;
 }
 
-void TrackPlayer::applyEvent (const Event& e) noexcept
+void TrackPlayer::applyEvent (const Event& e, int at) noexcept
 {
     if (e.isChoke)
     {
@@ -73,11 +74,14 @@ void TrackPlayer::applyEvent (const Event& e) noexcept
     current_ ^= 1;
     voices_[static_cast<std::size_t> (current_)].start (e.params);   // kills whatever tail was left there
     hit_ = true;
+    if (numMarks_ < kMaxEventsPerBlock)
+        marks_[static_cast<std::size_t> (numMarks_++)] = { at, e.params.shakalMacro };
 }
 
 void TrackPlayer::render (float* left, float* right, int numSamples) noexcept
 {
     hit_ = false;
+    numMarks_ = 0;
 
     // stable insertion sort by offset: chokes from other tracks arrive out of order
     for (int i = 1; i < numEvents_; ++i)
@@ -104,7 +108,7 @@ void TrackPlayer::render (float* left, float* right, int numSamples) noexcept
                 v.render (left, right, cursor, at);
             cursor = at;
         }
-        applyEvent (e);
+        applyEvent (e, at);
     }
 
     if (cursor < numSamples)

@@ -18,8 +18,30 @@ TrackPanel::TrackPanel (ProjectController& controller)
     : c_ (controller), wave (controller),
       velocity (controller, "Velocity"), ratchet (controller, "Ratchet"), velRamp (controller, "Vel ramp"),
       pitchRamp (controller, "Pitch ramp"), pitch (controller, "Step pitch"), sliceField (controller, "Slice"),
-      probability (controller, "Probability"), nudge (controller, "Nudge")
+      probability (controller, "Probability"), nudge (controller, "Nudge"),
+      fx (controller, false), mst (controller, true), masterGain (controller, "Master gain")
 {
+    for (int i = 0; i < 4; ++i)
+    {
+        auto& b = tabs[static_cast<std::size_t> (i)];
+        styleButton (b);
+        b.setColour (juce::TextButton::buttonOnColourId, palette::neonCyan);
+        b.onClick = [this, i] { c_.setTrackPanelTab (i); };
+        addAndMakeVisible (b);
+    }
+    addChildComponent (fx);
+    addChildComponent (mst);
+
+    masterGain.setRange (kMasterGainSpec.minValue, kMasterGainSpec.maxValue, 0.1);
+    masterGain.setDoubleClickReturnValue (true, kMasterGainDefaultDb);
+    masterGain.textFromValueFunction = [] (double v) { return juce::String (v, 1) + " dB"; };
+    masterGain.onValueChange = [this] { if (! refreshing_) c_.setMasterGainDb (static_cast<float> (masterGain.getValue())); };
+    addChildComponent (masterGain);
+    masterGainLabel.setText ("MASTER GAIN", juce::dontSendNotification);
+    masterGainLabel.setFont (monoFont (11.f));
+    masterGainLabel.setColour (juce::Label::textColourId, palette::dim);
+    addChildComponent (masterGainLabel);
+
     name.setFont (monoFont (14.f, true));
     name.setInputRestrictions (16);
     name.onReturnKey = [this] { unfocusAllComponents(); };
@@ -152,6 +174,39 @@ TrackPanel::TrackPanel (ProjectController& controller)
     refresh();
 }
 
+std::vector<juce::Component*> TrackPanel::srcComponents()
+{
+    std::vector<juce::Component*> v { &name, &wave, &load, &slice, &bars, &choke, &fit };
+    for (auto& k : knobs) v.push_back (k.get());
+    for (auto& l : knobLabels) v.push_back (&l);
+    return v;
+}
+
+std::vector<juce::Component*> TrackPanel::stepComponents()
+{
+    std::vector<juce::Component*> v { &stepTitle, &velocity, &ratchet, &velRamp, &pitchRamp, &pitch, &sliceField, &probability, &nudge,
+                                      &reverse, &condition };
+    for (auto& l : fieldLabels) v.push_back (&l);
+    return v;
+}
+
+void TrackPanel::showTab (int tab)
+{
+    shownTab_ = tab;
+    for (int i = 0; i < 4; ++i)
+        tabs[static_cast<std::size_t> (i)].setToggleState (i == tab, juce::dontSendNotification);
+    for (auto* comp : srcComponents())
+        comp->setVisible (tab == 0);
+    fx.setVisible (tab == 1);
+    for (auto* comp : stepComponents())
+        comp->setVisible (tab == 2);
+    mst.setVisible (tab == 3);
+    masterGain.setVisible (tab == 3);
+    masterGainLabel.setVisible (tab == 3);
+    refresh();
+    repaint();
+}
+
 void TrackPanel::editStep (const std::function<void (Step&)>& fn)
 {
     const auto s = c_.lastTouched();
@@ -181,7 +236,14 @@ void TrackPanel::timerCallback()
 
 void TrackPanel::refresh()
 {
+    if (c_.trackPanelTab() != shownTab_)
+    {
+        showTab (c_.trackPanelTab());
+        return;
+    }
     const juce::ScopedValueSetter<bool> guard (refreshing_, true);
+    if (! masterGain.isMouseButtonDown())
+        masterGain.setValue (c_.project().masterGainDb, juce::dontSendNotification);
     const int t = c_.selectedTrack();
     const auto& tr = c_.project().tracks[static_cast<std::size_t> (t)];
 
@@ -240,7 +302,7 @@ void TrackPanel::refresh()
     {
         const auto& pl = st.plocks[static_cast<std::size_t> (i)];
         auto& b = plockButtons[static_cast<std::size_t> (i)];
-        b.setVisible (pl.param < kNumTrackParams);
+        b.setVisible (shownTab_ == 2 && pl.param < kNumTrackParams);
         if (pl.param < kNumTrackParams)
             b.setButtonText (juce::String (std::string (kTrackParamSpecs[pl.param].label)) + " " + juce::String (pl.value, 2) + "  x");
     }
@@ -253,12 +315,29 @@ void TrackPanel::paint (juce::Graphics& g)
     g.fillAll (palette::panel);
     g.setColour (palette::gridLine);
     g.drawVerticalLine (0, 0.f, static_cast<float> (getHeight()));
-    g.drawHorizontalLine (stepTitle.getY() - 4, 8.f, static_cast<float> (getWidth() - 8));
 }
 
 void TrackPanel::resized()
 {
-    auto r = getLocalBounds().reduced (8, 6);
+    auto r = getLocalBounds();
+    auto tabRow = r.removeFromTop (24).reduced (6, 2);
+    const int tw = tabRow.getWidth() / 4;
+    for (auto& b : tabs)
+        b.setBounds (tabRow.removeFromLeft (tw).reduced (1, 0));
+
+    fx.setBounds (r);
+    auto m = r;
+    mst.setBounds (m.removeFromTop (m.getHeight() - 70));
+    auto g = m.reduced (8, 4);
+    masterGainLabel.setBounds (g.removeFromTop (14));
+    masterGain.setBounds (g.removeFromLeft (120));
+
+    layoutSrc (r.reduced (8, 6));
+    layoutStep (r.reduced (8, 6));
+}
+
+void TrackPanel::layoutSrc (juce::Rectangle<int> r)
+{
     name.setBounds (r.removeFromTop (24));
     r.removeFromTop (4);
     wave.setBounds (r.removeFromTop (80));
@@ -292,7 +371,10 @@ void TrackPanel::resized()
         }
     }
 
-    r.removeFromTop (10);
+}
+
+void TrackPanel::layoutStep (juce::Rectangle<int> r)
+{
     stepTitle.setBounds (r.removeFromTop (20));
 
     Field* fields[] { &velocity, &ratchet, &velRamp, &pitchRamp, &pitch, &sliceField, &probability, &nudge };

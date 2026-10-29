@@ -11,7 +11,7 @@
 namespace jackal
 {
 
-// One row per track: name, M, S, volume, SHAKAL (disabled until stage 3), hit LED.
+// One row per track: name, M, S, volume, SHAKAL macro (orange ring while a p-lock plays), hit LED.
 class TrackHeaders : public juce::Component, private juce::Timer
 {
 public:
@@ -36,6 +36,7 @@ private:
         juce::TextButton mute { "M" }, solo { "S" };
         Knob volume, shakal;
         float led = 0.f;
+        bool refreshing = false;
     };
 
     void timerCallback() override;

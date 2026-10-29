@@ -18,6 +18,16 @@
 namespace jackal
 {
 
+// Everything the master edit action snapshots (gain, SHAKAL macro and chain, seed for REROLL).
+struct MasterState
+{
+    float gainDb = kMasterGainDefaultDb;
+    float shakal = 0.f;
+    FxSettings fx {};
+    uint32_t seed = 0;
+    bool operator== (const MasterState&) const = default;
+};
+
 struct StepRef
 {
     int track = 0, slot = 0;
@@ -75,9 +85,22 @@ public:
     void setChoke (int track, int group);
     void importFile (int track, const juce::File& file);
 
+    // ---- SHAKAL (stage 3), undoable. chain 0..7 = track, kMasterChain = master.
+    void setFx (int chain, FxParam p, float value);    // Bypass and Preset included
+    void setShakal (int chain, float value);           // track: p-lock while a step is held
+    float shakalValue (int chain) const;
+    const FxSettings& fxSettings (int chain) const;
+    void setMasterGainDb (float db);
+    void reroll();
+    void applyMaster (const MasterState&);
+    ShakalSnapshot shakalSnapshot() const { return engine_.core().shakalSnapshot(); }
+
+    // ---- UI state, not undoable
+    void setTrackPanelTab (int tab);
+    int trackPanelTab() const noexcept { return project_->ui.trackPanelTab; }
+
     // ---- not undoable
     void setBpm (double bpm);
-    void setMasterGainDb (float db);
     void setMutationStrength (float s);
 
     // ---- transport / performance
@@ -131,6 +154,10 @@ private:
     void publishDirtyPatterns();
     void drainEngine();
     void pushTrack (int track);
+    void pushFx (int chain, const FxSettings& fx);
+    void pushMaster();
+    MasterState masterState() const;
+    void editMaster (const std::function<void (MasterState&)>& fn);
     void pushAll();
     void reloadSlot (int slot);
     void reslice (int slot);

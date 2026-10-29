@@ -24,6 +24,15 @@ struct SampleSlotSpec
     bool operator== (const SampleSlotSpec&) const = default;
 };
 
+struct FxSettings
+{
+    int8_t preset = 0;     // ShakalPreset
+    bool bypass = false;
+    // full FxParam array; Bypass and Preset entries are ignored (the fields above are the source of truth)
+    std::array<float, kNumFxParams> params = kFxParamDefaults;
+    bool operator== (const FxSettings&) const = default;
+};
+
 struct TrackSettings
 {
     std::string name;                          // <= 16 chars
@@ -31,7 +40,8 @@ struct TrackSettings
     uint8_t chokeGroup = 0;
     bool fitToTempo = false;
     bool mute = false, solo = false;
-    std::array<float, kNumTrackParams> params = kTrackParamDefaults;
+    std::array<float, kNumTrackParams> params = kTrackParamDefaults;   // params[Shakal] is the track macro
+    FxSettings fx {};
     bool operator== (const TrackSettings&) const = default;
 };
 
@@ -41,6 +51,7 @@ struct UiState
     int currentPattern = 0;
     int gridPage = 0;
     float mutationStrength = 0.5f;
+    int trackPanelTab = 0;   // 0 SRC, 1 FX, 2 STEP, 3 MST
     bool operator== (const UiState&) const = default;
 };
 
@@ -50,6 +61,8 @@ struct Project
     double bpm = 172.0;
     uint32_t seed = 0x5A4C;
     float masterGainDb = kMasterGainDefaultDb;
+    float masterShakal = 0.f;
+    FxSettings masterFx {};
     std::array<SampleSlotSpec, kNumSampleSlots> slots {};
     std::array<TrackSettings, kNumTracks> tracks {};
     std::array<Pattern, kNumPatterns> patterns {};

@@ -68,7 +68,7 @@ void MainComponent::getAllCommands (juce::Array<juce::CommandID>& ids)
     for (int i = 0; i < 16; ++i) ids.add (stepBase + i);
     for (int i = 0; i < 8; ++i) ids.addArray ({ hitBase + i, hitAccentBase + i, patternBase + i });
     ids.addArray ({ rowUp, rowDown, shiftLeft, shiftRight, nudgeLeft, nudgeRight, pageUp, pageDown, doubleLen, mutateCmd,
-                    undoCmd, redoCmd, redoAlt, saveCmd, saveAsCmd, openCmd, newCmd, closeOverlay, deletePLocks });
+                    undoCmd, redoCmd, redoAlt, saveCmd, saveAsCmd, openCmd, newCmd, closeOverlay, deletePLocks, nextTab });
 }
 
 void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommandInfo& info)
@@ -116,6 +116,7 @@ void MainComponent::getCommandInfo (juce::CommandID id, juce::ApplicationCommand
         case newCmd:       return set ("New", 'N', ctrl);
         case closeOverlay: return set ("Close overlay", KP::escapeKey, none);
         case deletePLocks: return set ("Delete p-locks", KP::deleteKey, none);
+        case nextTab:      return set ("Next panel tab", KP::tabKey, none);
         default: break;
     }
 }
@@ -170,6 +171,9 @@ bool MainComponent::perform (const InvocationInfo& info)
         case closeOverlay:
             if (settingsOverlay.isVisible())
                 toggleSettings();
+            return true;
+        case nextTab:
+            controller.setTrackPanelTab (controller.trackPanelTab() + 1);
             return true;
         case deletePLocks:
             if (auto s = stepGrid.hoverStep())

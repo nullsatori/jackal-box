@@ -94,10 +94,88 @@ TEST_CASE ("J2: tolerant reading, strict format checks", "[json]")
     REQUIRE (ok.project->patterns[0].lanes[0].steps[3].velocity == 127);
     REQUIRE (ok.project->patterns[0].lanes[0].length == 16);
 
-    auto v3 = fromJson (R"({"format":"jackal-project","version":3})");
-    REQUIRE (! v3.ok);
-    REQUIRE (! v3.error.empty());
+    // stage 3: version 3 is current, version 4 is the first unknown one
+    REQUIRE (fromJson (R"({"format":"jackal-project","version":3})").ok);
+    auto v4 = fromJson (R"({"format":"jackal-project","version":4})");
+    REQUIRE (! v4.ok);
+    REQUIRE (! v4.error.empty());
     REQUIRE (! fromJson (R"({"format":"other","version":2})").ok);
     REQUIRE (! fromJson ("{ broken json").ok);
     REQUIRE (! fromJson ("").ok);
+}
+
+TEST_CASE ("J3: version 2 migrates to version 3", "[json]")
+{
+    const char* v2 = R"({"format":"jackal-project","version":2,"name":"Old","bpm":170,"seed":7,"masterGainDb":-6,
+        "tracks":[{"name":"KICK","slot":0,"params":{"volume":-2,"shakal":0.7}},{"name":"BREAK","slot":7}],
+        "patterns":[{"bars":1,"swing":55,"lanes":[{"length":16,"speed":"x1","steps":[{"i":0,"v":120}]}]}]})";
+    auto r = fromJson (v2);
+    REQUIRE (r.ok);
+    REQUIRE (r.migratedFrom == 2);
+    REQUIRE (r.project->masterShakal == 0.f);
+    REQUIRE (r.project->masterFx == FxSettings {});
+    for (const auto& t : r.project->tracks)
+    {
+        REQUIRE (t.fx == FxSettings {});
+        REQUIRE (t.params[static_cast<std::size_t> (TrackParam::Shakal)] == 0.f);
+    }
+    REQUIRE (r.project->tracks[0].params[0] == -2.f);
+
+    const auto text = toJson (*r.project);
+    REQUIRE (text.find ("\"version\": 3") != std::string::npos);
+    auto again = fromJson (text);
+    REQUIRE (again.ok);
+    REQUIRE (again.migratedFrom == 0);
+    REQUIRE (*again.project == *r.project);
+}
+
+TEST_CASE ("J4: version 3 SHAKAL settings roundtrip", "[json]")
+{
+    auto p = std::make_unique<Project>();
+    auto fill = [] (FxSettings& f, int k) {
+        f.preset = static_cast<int8_t> (k % 3);
+        f.bypass = k == 4;
+        auto set = [&f] (FxParam q, float v) { f.params[static_cast<std::size_t> (q)] = v; };
+        set (FxParam::DriveOn, 1.f);       set (FxParam::DriveDb, 3.5f + static_cast<float> (k));
+        set (FxParam::DriveMode, static_cast<float> (k % 2));
+        set (FxParam::Sp12On, k % 2 == 0 ? 1.f : 0.f);  set (FxParam::Sp12FilterHz, 4000.f + 100.f * static_cast<float> (k));
+        set (FxParam::DecimOn, 1.f);       set (FxParam::DecimRateHz, 9000.f - 250.f * static_cast<float> (k));
+        set (FxParam::CrushOn, 1.f);       set (FxParam::CrushBits, 6.25f);
+        set (FxParam::CrushMulaw, static_cast<float> ((k + 1) % 2));
+        set (FxParam::FlipOn, 1.f);        set (FxParam::FlipProb, 0.125f);
+        set (FxParam::FlipBit, static_cast<float> (k + 3));
+        set (FxParam::FlipMode, static_cast<float> ((k / 2) % 2));
+        set (FxParam::GlitchOn, 1.f);      set (FxParam::GlitchProb, 0.5f);  set (FxParam::GlitchLenMs, 40.f + static_cast<float> (k));
+    };
+    for (int t = 0; t < kNumTracks; ++t)
+    {
+        auto& tr = p->tracks[static_cast<std::size_t> (t)];
+        fill (tr.fx, t);
+        tr.params[static_cast<std::size_t> (TrackParam::Shakal)] = 0.125f * static_cast<float> (t);
+    }
+    fill (p->masterFx, 8);
+    p->masterShakal = 0.375f;
+    p->ui.trackPanelTab = 3;
+    p->patterns[0].lanes[7].steps[6].active = true;
+    p->patterns[0].lanes[7].steps[6].plocks[0] = { static_cast<uint8_t> (TrackParam::Shakal), 1.f };
+
+    const auto text = toJson (*p);
+    auto r = fromJson (text);
+    REQUIRE (r.ok);
+    REQUIRE (*r.project == *p);
+    REQUIRE (toJson (*r.project) == text);
+
+    auto odd = fromJson (R"({"format":"jackal-project","version":3,
+        "tracks":[{"fx":{"preset":"tape","params":{"crushBits":40,"driveMode":"fold"}}}]})");
+    REQUIRE (odd.ok);
+    REQUIRE (odd.project->tracks[0].fx.preset == 0);
+    REQUIRE (odd.project->tracks[0].fx.params[static_cast<std::size_t> (FxParam::CrushBits)] == 16.f);
+    REQUIRE (odd.project->tracks[0].fx.params[static_cast<std::size_t> (FxParam::DriveMode)] == 0.f);
+
+    REQUIRE (! fromJson (R"({"format":"jackal-project","version":4})").ok);
+
+    auto bare = fromJson (R"({"format":"jackal-project","version":3,"tracks":[{"name":"X"}]})");
+    REQUIRE (bare.ok);
+    REQUIRE (bare.project->tracks[0].fx == FxSettings {});
+    REQUIRE (bare.project->masterFx == FxSettings {});
 }

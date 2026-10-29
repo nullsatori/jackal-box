@@ -120,6 +120,63 @@ namespace
         return (it != j.end() && it->is_object()) ? &*it : nullptr;
     }
 
+    // ---- SHAKAL settings (v3)
+
+    Json fxToJson (const FxSettings& f)
+    {
+        Json params = Json::object();
+        for (int i = 0; i < kNumFxParams; ++i)
+        {
+            const auto p = static_cast<FxParam> (i);
+            if (p == FxParam::Bypass || p == FxParam::Preset)
+                continue;
+            const auto& spec = fxParamSpec (p);
+            const float v = f.params[static_cast<std::size_t> (i)];
+            const std::string key (spec.name);
+            if (spec.scale == ParamScale::Toggle)
+                params[key] = v >= 0.5f;
+            else if (spec.scale == ParamScale::Choice)
+                params[key] = std::string (spec.choices[static_cast<std::size_t> (std::clamp<long> (std::lround (v), 0, 2))]);
+            else
+                params[key] = v;
+        }
+        const auto& presets = fxParamSpec (FxParam::Preset).choices;
+        return { { "preset", std::string (presets[static_cast<std::size_t> (std::clamp<int> (f.preset, 0, 2))]) },
+                 { "bypass", f.bypass }, { "params", std::move (params) } };
+    }
+
+    int choiceIndex (const FxParamSpecEntry& spec, const std::string& s, int def)
+    {
+        for (std::size_t i = 0; i < spec.choices.size(); ++i)
+            if (! spec.choices[i].empty() && spec.choices[i] == s)
+                return static_cast<int> (i);
+        return def;
+    }
+
+    FxSettings fxFromJson (const Json& o)
+    {
+        FxSettings f;
+        f.preset = static_cast<int8_t> (choiceIndex (fxParamSpec (FxParam::Preset), str (o, "preset", "iron"), 0));
+        f.bypass = flag (o, "bypass", false);
+        if (const Json* params = obj (o, "params"))
+            for (int i = 0; i < kNumFxParams; ++i)
+            {
+                const auto p = static_cast<FxParam> (i);
+                if (p == FxParam::Bypass || p == FxParam::Preset)
+                    continue;
+                const auto& spec = fxParamSpec (p);
+                const std::string key (spec.name);
+                float& v = f.params[static_cast<std::size_t> (i)];
+                if (spec.scale == ParamScale::Toggle)
+                    v = flag (*params, key.c_str(), spec.defaultValue >= 0.5f) ? 1.f : 0.f;
+                else if (spec.scale == ParamScale::Choice)
+                    v = static_cast<float> (choiceIndex (spec, str (*params, key.c_str(), ""), static_cast<int> (spec.defaultValue)));
+                else
+                    v = num<float> (*params, key.c_str(), spec.defaultValue, spec.minValue, spec.maxValue);
+            }
+        return f;
+    }
+
     // ---- writing
 
     Json stepToJson (const Step& s, int index)
@@ -191,6 +248,8 @@ std::string toJson (const Project& p)
     j["bpm"] = p.bpm;
     j["seed"] = p.seed;
     j["masterGainDb"] = p.masterGainDb;
+    j["masterShakal"] = p.masterShakal;
+    j["masterFx"] = fxToJson (p.masterFx);
 
     Json slots = Json::array();
     for (const auto& s : p.slots)
@@ -218,7 +277,8 @@ std::string toJson (const Project& p)
             params[std::string (kTrackParamSpecs[i].name)] = t.params[i];
 
         tracks.push_back ({ { "name", t.name }, { "slot", t.sampleSlot }, { "choke", t.chokeGroup },
-                            { "fit", t.fitToTempo }, { "mute", t.mute }, { "solo", t.solo }, { "params", std::move (params) } });
+                            { "fit", t.fitToTempo }, { "mute", t.mute }, { "solo", t.solo }, { "params", std::move (params) },
+                            { "fx", fxToJson (t.fx) } });
     }
     j["tracks"] = std::move (tracks);
 
@@ -248,7 +308,8 @@ std::string toJson (const Project& p)
     j["patterns"] = std::move (patterns);
 
     j["ui"] = { { "selectedTrack", p.ui.selectedTrack }, { "currentPattern", p.ui.currentPattern },
-                { "gridPage", p.ui.gridPage }, { "mutationStrength", p.ui.mutationStrength } };
+                { "gridPage", p.ui.gridPage }, { "mutationStrength", p.ui.mutationStrength },
+                { "trackPanelTab", p.ui.trackPanelTab } };
 
     return j.dump (1);
 }
@@ -293,6 +354,12 @@ ParseResult fromJson (std::string_view text)
     p->bpm = num<double> (j, "bpm", 172.0, 60.0, 300.0);
     p->seed = num<uint32_t> (j, "seed", 0x5A4C, 0u, 0xFFFFFFFFu);
     p->masterGainDb = num<float> (j, "masterGainDb", kMasterGainDefaultDb, kMasterGainSpec.minValue, kMasterGainSpec.maxValue);
+    if (version >= 3)
+    {
+        p->masterShakal = num<float> (j, "masterShakal", 0.f, 0.f, 1.f);
+        if (const Json* mf = obj (j, "masterFx"))
+            p->masterFx = fxFromJson (*mf);
+    }
 
     if (const Json* slots = arr (j, "slots"))
     {
@@ -338,6 +405,10 @@ ParseResult fromJson (std::string_view text)
                     const auto& spec = kTrackParamSpecs[k];
                     t.params[k] = num<float> (*params, std::string (spec.name).c_str(), spec.defaultValue, spec.minValue, spec.maxValue);
                 }
+            if (version < 3)
+                t.params[static_cast<std::size_t> (TrackParam::Shakal)] = 0.f;   // v2 had no SHAKAL: clean sound
+            else if (const Json* fx = obj (o, "fx"))
+                t.fx = fxFromJson (*fx);
         }
     }
 
@@ -397,9 +468,11 @@ ParseResult fromJson (std::string_view text)
         p->ui.currentPattern = num<int> (*ui, "currentPattern", 0, 0, kNumPatterns - 1);
         p->ui.gridPage = num<int> (*ui, "gridPage", 0, 0, 3);
         p->ui.mutationStrength = num<float> (*ui, "mutationStrength", 0.5f, 0.f, 1.f);
+        p->ui.trackPanelTab = num<int> (*ui, "trackPanelTab", 0, 0, 3);
     }
 
     result.ok = true;
+    result.migratedFrom = version < kProjectFormatVersion ? version : 0;
     result.project = std::move (p);
     return result;
 }

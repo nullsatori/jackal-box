@@ -18,9 +18,18 @@ add_executable(jackal_tests
     DemoKitTests.cpp
     SlicerTests.cpp
     PatternOpsTests.cpp
-    Stage2CoreTests.cpp)
+    Stage2CoreTests.cpp
+    FxTestHelpers.h
+    ShakalEffectTests.cpp
+    ShakalChainTests.cpp
+    MacroCurveTests.cpp)
 
 target_link_libraries(jackal_tests PRIVATE jackal_engine jackal_model Catch2::Catch2WithMain)
+
+# the CPU budget test (K6) skips itself under sanitizers
+if(CMAKE_CXX_FLAGS MATCHES "sanitize")
+    target_compile_definitions(jackal_tests PRIVATE JACKAL_UNDER_SANITIZER=1)
+endif()
 
 if(MSVC)
     target_compile_options(jackal_tests PRIVATE /W4 /bigobj)

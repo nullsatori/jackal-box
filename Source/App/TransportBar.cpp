@@ -6,7 +6,7 @@ namespace jackal
 {
 
 TransportBar::TransportBar (ProjectController& controller, EngineCore& c, AppSettings& s)
-    : c_ (controller), core (c), settings (s), fillButton (controller), swing (controller, "Swing"), master (controller, "Master")
+    : c_ (controller), core (c), settings (s), fillButton (controller), swing (controller, "Swing"), master (controller, "Master"), masterShakal (controller, "Master SHAKAL")
 {
     for (auto* b : std::initializer_list<juce::Button*> { &playButton, &recButton, &fillButton, &clickToggle })
     {
@@ -19,7 +19,7 @@ TransportBar::TransportBar (ProjectController& controller, EngineCore& c, AppSet
     playButton.onClick = [this] { c_.togglePlay(); };
     recButton.onClick = [this] { c_.setRecording (! c_.recording()); };
 
-    for (auto* l : { &position, &patternLetter, &cpu, &swingLabel, &masterLabel })
+    for (juce::Label* l : { &position, &patternLetter, &cpu, &swingLabel, static_cast<juce::Label*> (&masterLabel), static_cast<juce::Label*> (&shakalLabel) })
         addAndMakeVisible (*l);
     position.setJustificationType (juce::Justification::centred);
     position.setColour (juce::Label::textColourId, palette::nixie);
@@ -31,7 +31,12 @@ TransportBar::TransportBar (ProjectController& controller, EngineCore& c, AppSet
     cpu.setJustificationType (juce::Justification::centredRight);
     swingLabel.setText ("SWING", juce::dontSendNotification);
     masterLabel.setText ("MASTER", juce::dontSendNotification);
-    for (auto* l : { &swingLabel, &masterLabel })
+    shakalLabel.setText ("SHAKAL", juce::dontSendNotification);
+    masterLabel.onClick = [this] { c_.setTrackPanelTab (3); };
+    shakalLabel.onClick = [this] { c_.setTrackPanelTab (3); };
+    masterLabel.setTooltip ("click: master tab");
+    shakalLabel.setTooltip ("click: master tab");
+    for (juce::Label* l : { &swingLabel, static_cast<juce::Label*> (&masterLabel), static_cast<juce::Label*> (&shakalLabel) })
     {
         l->setFont (monoFont (11.f));
         l->setColour (juce::Label::textColourId, palette::dim);
@@ -77,6 +82,12 @@ TransportBar::TransportBar (ProjectController& controller, EngineCore& c, AppSet
     master.onValueChange = [this] { c_.setMasterGainDb (static_cast<float> (master.getValue())); };
     addAndMakeVisible (master);
 
+    masterShakal.setRange (0.0, 1.0, 0.0);
+    masterShakal.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+    masterShakal.setDoubleClickReturnValue (true, 0.0);
+    masterShakal.onValueChange = [this] { c_.setShakal (kMasterChain, static_cast<float> (masterShakal.getValue())); };
+    addAndMakeVisible (masterShakal);
+
     startTimerHz (30);
 }
 
@@ -118,6 +129,8 @@ void TransportBar::timerCallback()
             swing.setValue (c_.editPattern().swing, juce::dontSendNotification);
         if (! master.isMouseButtonDown())
             master.setValue (c_.project().masterGainDb, juce::dontSendNotification);
+        if (! masterShakal.isMouseButtonDown())
+            masterShakal.setValue (c_.project().masterShakal, juce::dontSendNotification);
         swing.setTooltip ("Swing " + juce::String (c_.editPattern().swing) + " (pattern)");
         master.setTooltip ("Master " + juce::String (c_.project().masterGainDb, 1) + " dB");
     }
@@ -156,6 +169,8 @@ void TransportBar::resized()
     swing.setBounds (r.removeFromLeft (40));
     masterLabel.setBounds (r.removeFromLeft (56));
     master.setBounds (r.removeFromLeft (40));
+    shakalLabel.setBounds (r.removeFromLeft (56));
+    masterShakal.setBounds (r.removeFromLeft (40));
     cpu.setBounds (r);
 }
 

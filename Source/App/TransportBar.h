@@ -38,8 +38,15 @@ private:
     juce::Slider bpm { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
     juce::ToggleButton clickToggle { "CLICK" };
     juce::Slider clickGain { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
-    Knob swing, master;
-    juce::Label swingLabel, masterLabel;
+    struct ClickLabel : juce::Label
+    {
+        std::function<void()> onClick;
+        void mouseUp (const juce::MouseEvent&) override { if (onClick) onClick(); }
+    };
+
+    Knob swing, master, masterShakal;
+    juce::Label swingLabel;
+    ClickLabel masterLabel, shakalLabel;
 
     bool shownPlaying = false;
     uint32_t shownVersion_ = 0;

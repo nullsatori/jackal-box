@@ -77,6 +77,23 @@ void JackalLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int w
     const juce::Point<float> tip (centre.x + std::sin (angle) * radius, centre.y - std::cos (angle) * radius);
     const juce::Point<float> inner (centre.x + std::sin (angle) * radius * 0.55f, centre.y - std::cos (angle) * radius * 0.55f);
     g.drawLine ({ inner, tip }, 1.5f);
+
+    const auto actual = slider.getProperties()[actualProperty];
+    if (! actual.isVoid())
+    {
+        const float a = startAngle + juce::jlimit (0.f, 1.f, static_cast<float> (actual)) * (endAngle - startAngle);
+        const float r2 = radius - 3.f;
+        juce::Path arc;
+        arc.addCentredArc (centre.x, centre.y, r2, r2, 0.f, startAngle, a, true);
+        g.setColour (palette::dim);
+        g.strokePath (arc, juce::PathStrokeType (1.f));
+    }
+
+    if (static_cast<bool> (slider.getProperties()[ringProperty]))
+    {
+        g.setColour (palette::nixie);
+        g.drawEllipse (bounds.withSizeKeepingCentre (radius * 2.f + 4.f, radius * 2.f + 4.f), 1.f);
+    }
 }
 
 void JackalLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& button, const juce::Colour& backgroundColour,

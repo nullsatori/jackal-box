@@ -168,6 +168,9 @@ bool Sequencer::buildTrigger (const SequencerContext& ctx, int track, const Step
     out.pan = val (TrackParam::Pan);
     out.volumeDb = val (TrackParam::Volume);
     out.attackSamples = 32;
+    for (const auto& pl : step.plocks)
+        if (pl.param == static_cast<uint8_t> (TrackParam::Shakal))
+            out.shakalMacro = std::clamp (pl.value, 0.f, 1.f);
 
     const int ns = s->numSlices();
     if (ns > 0)

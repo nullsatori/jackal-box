@@ -24,6 +24,8 @@ void EngineCore::prepare (double sampleRate, int maxBlockSize, int /*numInputs*/
     glitch_.prepare (sampleRate, maxBlock_);
     for (auto& p : players_)
         p.prepare (sampleRate, maxBlock_);
+    for (int c = 0; c < kNumChains; ++c)
+        chains_[static_cast<std::size_t> (c)].prepare (sampleRate, maxBlock_, c);
     for (auto& b : buses_)
         b.assign (static_cast<std::size_t> (maxBlock_), 0.f);
     for (auto& m : master_)
@@ -61,6 +63,8 @@ void EngineCore::applyCommand (const Command& c, SequencerContext& ctx) noexcept
             sequencer_.reset();
             glitch_.reset();
             metronome_.reset();
+            for (auto& ch : chains_)
+                ch.reset();
             break;
 
         case CommandType::Stop:
@@ -68,6 +72,8 @@ void EngineCore::applyCommand (const Command& c, SequencerContext& ctx) noexcept
             sequencer_.reset();
             glitch_.reset();
             metronome_.reset();
+            for (auto& ch : chains_)
+                ch.reset();
             break;
 
         case CommandType::SetBpm:          transport_.setBpm (static_cast<double> (c.value)); break;
@@ -244,10 +250,22 @@ void EngineCore::processBlock (const float* const* in, int numIn, float* const* 
     // (6) sequencer -> track players, glitch pad events
     sequencer_.process (ctx);
 
-    // (7) tracks render into their buses (stage 3 seam: per-track inserts go here)
+    // (7) tracks render into their buses
     for (int t = 0; t < kNumTracks; ++t)
         players_[static_cast<std::size_t> (t)].render (buses_[static_cast<std::size_t> (2 * t)].data(),
                                                        buses_[static_cast<std::size_t> (2 * t + 1)].data(), n);
+
+    // (7a) SHAKAL per track (stage 4 seam: VST3 track slots go right after this, on the same bus)
+    const bool playing = transport_.isPlaying();
+    if (! fxDisabled_)
+        for (int t = 0; t < kNumTracks; ++t)
+        {
+            auto& chain = chains_[static_cast<std::size_t> (t)];
+            for (const auto& mark : players_[static_cast<std::size_t> (t)].triggersThisBlock())
+                chain.onTrigger (mark.offset, mark.shakalMacro);
+            chain.process (buses_[static_cast<std::size_t> (2 * t)].data(), buses_[static_cast<std::size_t> (2 * t + 1)].data(), n,
+                           params_.params, transport_, ctx.blockStart, playing, seed_);
+        }
 
     // (8) sum buses into master
     for (int t = 0; t < kNumTracks; ++t)
@@ -261,8 +279,11 @@ void EngineCore::processBlock (const float* const* in, int numIn, float* const* 
         }
     }
 
-    // (9) glitch pads, then master gain (stage 3 seam: master SHAKAL after the glitch)
+    // (9) glitch pads, (9a) master SHAKAL, then master gain (stage 4 seam: master VST3 slots before the gain)
     glitch_.process (masterPtrs[0], masterPtrs[1], n, transport_, ctx.blockStart);
+    if (! fxDisabled_)
+        chains_[static_cast<std::size_t> (kMasterChain)].process (masterPtrs[0], masterPtrs[1], n, params_.params, transport_,
+                                                                  ctx.blockStart, playing, seed_);
     for (int i = 0; i < n; ++i)
     {
         masterPtrs[0][i] *= masterGain;
@@ -321,6 +342,29 @@ void EngineCore::publishSnapshot() noexcept
     snapPendingPad_.store (glitch_.pendingPad(), std::memory_order_relaxed);
     snapRecording_.store (recording_, std::memory_order_relaxed);
     snapDropped_.store (dropped_, std::memory_order_relaxed);
+
+    uint16_t ov = 0;
+    for (int c = 0; c < kNumChains; ++c)
+    {
+        const auto& ch = chains_[static_cast<std::size_t> (c)];
+        snapMacro_[static_cast<std::size_t> (c)].store (ch.macroActual(), std::memory_order_relaxed);
+        snapEngaged_[static_cast<std::size_t> (c)].store (ch.engagedMask(), std::memory_order_relaxed);
+        if (ch.overrideActive())
+            ov = static_cast<uint16_t> (ov | (1u << c));
+    }
+    snapOverride_.store (ov, std::memory_order_relaxed);
+}
+
+ShakalSnapshot EngineCore::shakalSnapshot() const noexcept
+{
+    ShakalSnapshot s;
+    for (int c = 0; c < kNumChains; ++c)
+    {
+        s.macro[static_cast<std::size_t> (c)] = snapMacro_[static_cast<std::size_t> (c)].load (std::memory_order_relaxed);
+        s.engaged[static_cast<std::size_t> (c)] = snapEngaged_[static_cast<std::size_t> (c)].load (std::memory_order_relaxed);
+    }
+    s.overrideMask = snapOverride_.load (std::memory_order_relaxed);
+    return s;
 }
 
 TransportState EngineCore::transportSnapshot() const noexcept

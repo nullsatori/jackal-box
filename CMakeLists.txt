@@ -44,7 +44,26 @@ add_library(jackal_engine STATIC
     Source/Engine/InputMonitor.h
     Source/Engine/InputMonitor.cpp
     Source/Engine/EngineCore.h
-    Source/Engine/EngineCore.cpp)
+    Source/Engine/EngineCore.cpp
+    Source/Engine/Fx/FxParams.h
+    Source/Engine/Fx/FxHash.h
+    Source/Engine/Fx/Biquad.h
+    Source/Engine/Fx/DriveFx.h
+    Source/Engine/Fx/DriveFx.cpp
+    Source/Engine/Fx/Sp12Fx.h
+    Source/Engine/Fx/Sp12Fx.cpp
+    Source/Engine/Fx/DecimatorFx.h
+    Source/Engine/Fx/DecimatorFx.cpp
+    Source/Engine/Fx/BitcrushFx.h
+    Source/Engine/Fx/BitcrushFx.cpp
+    Source/Engine/Fx/BitflipFx.h
+    Source/Engine/Fx/BitflipFx.cpp
+    Source/Engine/Fx/GlitchBufferFx.h
+    Source/Engine/Fx/GlitchBufferFx.cpp
+    Source/Engine/Fx/MacroCurves.h
+    Source/Engine/Fx/MacroCurves.cpp
+    Source/Engine/Fx/ShakalChain.h
+    Source/Engine/Fx/ShakalChain.cpp)
 
 target_include_directories(jackal_engine PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/Source")
 
@@ -125,7 +144,8 @@ if(JACKAL_BUILD_APP)
         Source/App/WaveformView.cpp
         Source/App/GlitchPadBar.cpp
         Source/App/StatusBar.cpp
-        Source/App/SettingsOverlay.cpp)
+        Source/App/SettingsOverlay.cpp
+        Source/App/ShakalSection.cpp)
 
     target_compile_definitions(JackalBox PRIVATE
         JUCE_WEB_BROWSER=0

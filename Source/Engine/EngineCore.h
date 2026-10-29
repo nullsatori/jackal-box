@@ -2,6 +2,7 @@
 
 #include "CommandQueue.h"
 #include "EngineTypes.h"
+#include "Fx/ShakalChain.h"
 #include "GlitchProcessor.h"
 #include "InputMonitor.h"
 #include "LevelMeter.h"
@@ -38,6 +39,10 @@ public:
 
     TransportState transportSnapshot() const noexcept;
     SequencerSnapshot sequencerSnapshot() const noexcept;
+    ShakalSnapshot shakalSnapshot() const noexcept;
+
+    // Test builds only: skip steps 7a and 9a (regression E2). Never used by the app.
+    void setFxDisabledForTests (bool off) noexcept { fxDisabled_ = off; }
 
     const LevelMeter& inputMeter() const noexcept { return inputMeter_; }
     const LevelMeter& outputMeter() const noexcept { return outputMeter_; }
@@ -64,6 +69,8 @@ private:
     SampleBank bank_;
     GlitchProcessor glitch_;
     std::array<TrackPlayer, kNumTracks> players_ {};
+    std::array<ShakalChain, kNumChains> chains_ {};
+    bool fxDisabled_ = false;
     std::array<TrackState, kNumTracks> tracks_ {};
     std::array<std::vector<float>, kNumTracks * 2> buses_;
     std::array<std::vector<float>, 2> master_;
@@ -84,6 +91,9 @@ private:
     std::atomic<bool> snapRecording_ { false };
     std::atomic<uint32_t> snapDropped_ { 0 };
     std::atomic<float> cpuLoad_ { 0.f };
+    std::array<std::atomic<float>, kNumChains> snapMacro_ {};
+    std::array<std::atomic<uint8_t>, kNumChains> snapEngaged_ {};
+    std::atomic<uint16_t> snapOverride_ { 0 };
 };
 
 } // namespace jackal

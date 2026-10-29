@@ -45,6 +45,10 @@ public:
 
     // A slider with this property set to true draws in nixie orange (p-locked knob).
     static constexpr const char* lockedProperty = "jackalLocked";
+    // Optional 0..1: a thin second arc with the value the engine actually applies (SHAKAL macro).
+    static constexpr const char* actualProperty = "actual";
+    // true: an orange ring around the knob (SHAKAL override from a p-lock is playing).
+    static constexpr const char* ringProperty = "jackalRing";
 };
 
 } // namespace jackal

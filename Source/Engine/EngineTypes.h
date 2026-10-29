@@ -68,6 +68,13 @@ struct SequencerSnapshot
     uint32_t droppedCommands = 0;
 };
 
+struct ShakalSnapshot
+{
+    std::array<float, kNumChains> macro {};
+    std::array<uint8_t, kNumChains> engaged {};
+    uint16_t overrideMask = 0;   // bit per chain
+};
+
 enum class EngineEventType : uint8_t { TrackHit, StepRecorded, GlitchRecorded, PadState };
 
 struct EngineEvent

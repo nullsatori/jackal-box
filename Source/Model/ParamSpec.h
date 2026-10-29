@@ -30,6 +30,63 @@ constexpr std::array<ParamSpecEntry, kNumTrackParams> kTrackParamSpecs { {
 
 constexpr ParamSpecEntry kMasterGainSpec { "masterGain", "MASTER", -24.f, 6.f, kMasterGainDefaultDb, "dB" };
 
+// ---- SHAKAL chains (stage 3)
+
+enum class ParamScale : uint8_t { Linear, Log, Toggle, Choice };
+
+struct FxParamSpecEntry
+{
+    std::string_view name, label;
+    float minValue, maxValue, defaultValue;
+    std::string_view unit;
+    ParamScale scale;
+    std::array<std::string_view, 3> choices;   // JSON strings for Choice params
+};
+
+constexpr std::array<FxParamSpecEntry, kNumFxParams> kFxParamSpecs { {
+    { "fxBypass",     "BYP",   0.f,     1.f,     kFxParamDefaults[0],  "",   ParamScale::Toggle, {} },
+    { "fxPreset",     "PRESET",0.f,     2.f,     kFxParamDefaults[1],  "",   ParamScale::Choice, { "iron", "net", "mem" } },
+    { "driveOn",      "ON",    0.f,     1.f,     kFxParamDefaults[2],  "",   ParamScale::Toggle, {} },
+    { "driveDb",      "dB",    0.f,     36.f,    kFxParamDefaults[3],  "dB", ParamScale::Linear, {} },
+    { "driveMode",    "MODE",  0.f,     1.f,     kFxParamDefaults[4],  "",   ParamScale::Choice, { "clip", "wrap" } },
+    { "sp12On",       "ON",    0.f,     1.f,     kFxParamDefaults[5],  "",   ParamScale::Toggle, {} },
+    { "sp12FilterHz", "FILT",  3000.f,  20000.f, kFxParamDefaults[6],  "Hz", ParamScale::Log,    {} },
+    { "decimOn",      "ON",    0.f,     1.f,     kFxParamDefaults[7],  "",   ParamScale::Toggle, {} },
+    { "decimRateHz",  "RATE",  500.f,   48000.f, kFxParamDefaults[8],  "Hz", ParamScale::Log,    {} },
+    { "crushOn",      "ON",    0.f,     1.f,     kFxParamDefaults[9],  "",   ParamScale::Toggle, {} },
+    { "crushBits",    "BITS",  1.f,     16.f,    kFxParamDefaults[10], "",   ParamScale::Linear, {} },
+    { "crushMulaw",   "LAW",   0.f,     1.f,     kFxParamDefaults[11], "",   ParamScale::Toggle, {} },
+    { "flipOn",       "ON",    0.f,     1.f,     kFxParamDefaults[12], "",   ParamScale::Toggle, {} },
+    { "flipProb",     "PROB",  0.f,     1.f,     kFxParamDefaults[13], "",   ParamScale::Linear, {} },
+    { "flipBit",      "BIT",   0.f,     15.f,    kFxParamDefaults[14], "",   ParamScale::Linear, {} },
+    { "flipMode",     "MODE",  0.f,     1.f,     kFxParamDefaults[15], "",   ParamScale::Choice, { "sample", "burst" } },
+    { "glitchOn",     "ON",    0.f,     1.f,     kFxParamDefaults[16], "",   ParamScale::Toggle, {} },
+    { "glitchProb",   "PROB",  0.f,     1.f,     kFxParamDefaults[17], "",   ParamScale::Linear, {} },
+    { "glitchLenMs",  "LEN",   5.f,     200.f,   kFxParamDefaults[18], "ms", ParamScale::Log,    {} },
+} };
+
+constexpr ParamSpecEntry kMasterShakalSpec { "masterShakal", "SHAKAL", 0.f, 1.f, 0.f, "" };
+
+inline const FxParamSpecEntry& fxParamSpec (FxParam p) noexcept
+{
+    return kFxParamSpecs[static_cast<std::size_t> (p)];
+}
+
+inline float clampFxParam (FxParam p, float v) noexcept
+{
+    const auto& s = fxParamSpec (p);
+    return std::clamp (v, s.minValue, s.maxValue);
+}
+
+// -1 when unknown
+inline int fxParamFromName (std::string_view name) noexcept
+{
+    for (std::size_t i = 0; i < kFxParamSpecs.size(); ++i)
+        if (kFxParamSpecs[i].name == name)
+            return static_cast<int> (i);
+    return -1;
+}
+
 inline const ParamSpecEntry& trackParamSpec (TrackParam p) noexcept
 {
     return kTrackParamSpecs[static_cast<std::size_t> (p)];
@@ -47,6 +104,40 @@ inline int trackParamFromName (std::string_view name) noexcept
     for (std::size_t i = 0; i < kTrackParamSpecs.size(); ++i)
         if (kTrackParamSpecs[i].name == name)
             return static_cast<int> (i);
+    return -1;
+}
+
+// Name of any ParamId (track, master, fx); empty when the id is unused. For JSON and MIDI learn.
+inline std::string_view paramName (ParamId id) noexcept
+{
+    if (id == masterParam (MasterParam::Gain))   return kMasterGainSpec.name;
+    if (id == masterParam (MasterParam::Shakal)) return kMasterShakalSpec.name;
+    if (id >= kTrackBase && id < kTrackBase + kNumTracks * kTrackStride)
+    {
+        const int p = (id - kTrackBase) % kTrackStride;
+        return p < kNumTrackParams ? kTrackParamSpecs[static_cast<std::size_t> (p)].name : std::string_view {};
+    }
+    if (id >= kFxBase && id < kFxBase + kNumChains * kFxStride)
+    {
+        const int p = (id - kFxBase) % kFxStride;
+        return p < kNumFxParams ? kFxParamSpecs[static_cast<std::size_t> (p)].name : std::string_view {};
+    }
+    return {};
+}
+
+// chain 0..7 = track, kMasterChain = master. Track and fx names both resolve; -1 when unknown.
+inline int paramIdByName (int chain, std::string_view name) noexcept
+{
+    if (const int f = fxParamFromName (name); f >= 0)
+        return fxParam (chain, static_cast<FxParam> (f));
+    if (chain == kMasterChain)
+    {
+        if (name == kMasterGainSpec.name)   return masterParam (MasterParam::Gain);
+        if (name == kMasterShakalSpec.name || name == "shakal") return masterParam (MasterParam::Shakal);
+        return -1;
+    }
+    if (const int t = trackParamFromName (name); t >= 0)
+        return trackParam (chain, static_cast<TrackParam> (t));
     return -1;
 }
 
