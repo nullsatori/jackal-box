@@ -27,6 +27,10 @@ public:
 
     double samplesPerBeat() const noexcept;
     int64_t sampleOfBeat (int64_t beatIndex) const noexcept;
+    int64_t sampleAtBeat (double beats) const noexcept;    // sequencer clock (fractional beats)
+    double beatAtSample (int64_t sample) const noexcept;   // inverse, for record quantize
+    double sampleRate() const noexcept { return sampleRate_; }
+    double bpm() const noexcept { return anchor_.bpm; }
     TransportState state() const noexcept;
 
     bool isPlaying() const noexcept { return playing_; }

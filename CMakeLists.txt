@@ -22,6 +22,20 @@ set(JACKAL_ASIO_SDK_DIR "$ENV{ASIO_SDK_DIR}" CACHE PATH "Path to a local Steinbe
 add_library(jackal_engine STATIC
     Source/Engine/EngineTypes.h
     Source/Engine/CommandQueue.h
+    Source/Engine/SpscQueue.h
+    Source/Engine/ParamIds.h
+    Source/Engine/PatternData.h
+    Source/Engine/Sample.h
+    Source/Engine/SampleBank.h
+    Source/Engine/StepHash.h
+    Source/Engine/Voice.h
+    Source/Engine/Voice.cpp
+    Source/Engine/TrackPlayer.h
+    Source/Engine/TrackPlayer.cpp
+    Source/Engine/Sequencer.h
+    Source/Engine/Sequencer.cpp
+    Source/Engine/GlitchProcessor.h
+    Source/Engine/GlitchProcessor.cpp
     Source/Engine/LevelMeter.h
     Source/Engine/Transport.h
     Source/Engine/Transport.cpp
@@ -38,6 +52,36 @@ if(MSVC)
     target_compile_options(jackal_engine PRIVATE /W4 /WX /permissive-)
 else()
     target_compile_options(jackal_engine PRIVATE -Wall -Wextra -Wpedantic -Werror -Wconversion)
+endif()
+
+# ---------------------------------------------------------------------------
+# Model: project, JSON, pattern ops, mutation, demo kit, slicer. No JUCE.
+# ---------------------------------------------------------------------------
+include(cmake/FetchJson.cmake)
+
+add_library(jackal_model STATIC
+    Source/Model/Project.h
+    Source/Model/ParamSpec.h
+    Source/Model/ProjectJson.h
+    Source/Model/ProjectJson.cpp
+    Source/Model/PatternOps.h
+    Source/Model/PatternOps.cpp
+    Source/Model/Mutation.h
+    Source/Model/Mutation.cpp
+    Source/Model/DemoKit.h
+    Source/Model/DemoKit.cpp
+    Source/Model/Slicer.h
+    Source/Model/Slicer.cpp)
+
+target_link_libraries(jackal_model PUBLIC jackal_engine)
+# nlohmann as a SYSTEM include so its warnings never break -Werror
+get_target_property(_json_inc nlohmann_json::nlohmann_json INTERFACE_INCLUDE_DIRECTORIES)
+target_include_directories(jackal_model SYSTEM PRIVATE ${_json_inc})
+
+if(MSVC)
+    target_compile_options(jackal_model PRIVATE /W4 /WX /permissive- /bigobj)
+else()
+    target_compile_options(jackal_model PRIVATE -Wall -Wextra -Wpedantic -Werror -Wconversion)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -85,7 +129,9 @@ if(JACKAL_BUILD_APP)
     target_link_libraries(JackalBox
         PRIVATE
             jackal_engine
+            jackal_model
             juce::juce_audio_devices
+            juce::juce_audio_formats
             juce::juce_audio_utils
             juce::juce_gui_extra
         PUBLIC

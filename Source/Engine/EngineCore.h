@@ -2,13 +2,19 @@
 
 #include "CommandQueue.h"
 #include "EngineTypes.h"
+#include "GlitchProcessor.h"
 #include "InputMonitor.h"
 #include "LevelMeter.h"
 #include "Metronome.h"
+#include "SampleBank.h"
+#include "Sequencer.h"
+#include "TrackPlayer.h"
 #include "Transport.h"
 
+#include <array>
 #include <atomic>
 #include <cstdint>
+#include <vector>
 
 namespace jackal
 {
@@ -20,19 +26,32 @@ public:
     void prepare (double sampleRate, int maxBlockSize, int numInputs, int numOutputs);
     void process (const float* const* in, int numIn, float* const* out, int numOut, int numSamples) noexcept;
 
+    // Not the audio thread: call only after the audio callback is removed.
+    // Moves every pattern and sample pointer the engine holds into the retire queue.
+    void releaseAll() noexcept;
+
     CommandQueue& commands() noexcept { return commands_; }
     EngineParams& params() noexcept { return params_; }
+    MidiQueue& midi() noexcept { return midi_; }
+    EventQueue& events() noexcept { return events_; }
+    RetireQueue& retired() noexcept { return retired_; }
 
     TransportState transportSnapshot() const noexcept;
+    SequencerSnapshot sequencerSnapshot() const noexcept;
 
     const LevelMeter& inputMeter() const noexcept { return inputMeter_; }
     const LevelMeter& outputMeter() const noexcept { return outputMeter_; }
+    std::atomic<float>& cpuLoad() noexcept { return cpuLoad_; }
 
 private:
-    void applyCommand (const Command& command) noexcept;
+    void processBlock (const float* const* in, int numIn, float* const* out, int numOut, int numSamples) noexcept;
+    void applyCommand (const Command& command, SequencerContext& ctx) noexcept;
     void publishSnapshot() noexcept;
 
     CommandQueue commands_;
+    MidiQueue midi_;
+    EventQueue events_;
+    RetireQueue retired_;
     EngineParams params_;
 
     Transport transport_;
@@ -41,10 +60,30 @@ private:
     LevelMeter inputMeter_;
     LevelMeter outputMeter_;
 
+    Sequencer sequencer_;
+    SampleBank bank_;
+    GlitchProcessor glitch_;
+    std::array<TrackPlayer, kNumTracks> players_ {};
+    std::array<TrackState, kNumTracks> tracks_ {};
+    std::array<std::vector<float>, kNumTracks * 2> buses_;
+    std::array<std::vector<float>, 2> master_;
+    int maxBlock_ = 0;
+    bool recording_ = false;
+    uint32_t seed_ = 0x5A4C;
+    uint32_t dropped_ = 0;
+    int lastPadState_ = -1;
+
     std::atomic<bool> snapPlaying_ { false };
     std::atomic<double> snapBpm_ { kDefaultBpm };
     std::atomic<int64_t> snapPositionSamples_ { 0 };
     std::atomic<double> snapPositionBeats_ { 0.0 };
+
+    std::atomic<int> snapCurrentPattern_ { 0 }, snapPendingPattern_ { -1 };
+    std::array<std::atomic<int>, kNumTracks> snapLaneSlot_ {};
+    std::atomic<int> snapGlitchSlot_ { -1 }, snapActivePad_ { -1 }, snapPendingPad_ { -1 };
+    std::atomic<bool> snapRecording_ { false };
+    std::atomic<uint32_t> snapDropped_ { 0 };
+    std::atomic<float> cpuLoad_ { 0.f };
 };
 
 } // namespace jackal

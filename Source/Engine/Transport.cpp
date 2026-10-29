@@ -51,6 +51,17 @@ int64_t Transport::sampleOfBeat (int64_t beatIndex) const noexcept
     return anchor_.sample + static_cast<int64_t> (std::llround (offset));
 }
 
+int64_t Transport::sampleAtBeat (double beats) const noexcept
+{
+    const double offset = (beats - anchor_.beat) * samplesPerBeat();
+    return anchor_.sample + static_cast<int64_t> (std::llround (offset));
+}
+
+double Transport::beatAtSample (int64_t sample) const noexcept
+{
+    return anchor_.beat + static_cast<double> (sample - anchor_.sample) / samplesPerBeat();
+}
+
 double Transport::positionBeats() const noexcept
 {
     return anchor_.beat + static_cast<double> (positionSamples_ - anchor_.sample) / samplesPerBeat();
