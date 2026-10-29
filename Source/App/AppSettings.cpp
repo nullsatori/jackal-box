@@ -80,7 +80,7 @@ double AppSettings::bpm() const             { return file().getDoubleValue (keys
 bool AppSettings::metronomeEnabled() const  { return file().getBoolValue (keys::metronomeEnabled, true); }
 float AppSettings::metronomeGain() const    { return static_cast<float> (file().getDoubleValue (keys::metronomeGain, 0.5)); }
 bool AppSettings::monitorEnabled() const    { return file().getBoolValue (keys::monitorEnabled, true); }
-float AppSettings::monitorGainDb() const    { return static_cast<float> (file().getDoubleValue (keys::monitorGainDb, 0.0)); }
+float AppSettings::monitorGainDb() const    { return static_cast<float> (file().getDoubleValue (keys::monitorGainDb, -40.0)); } // 1 % amplitude: no mic-to-speaker feedback on first run
 int AppSettings::inputChannel() const       { return file().getIntValue (keys::inputChannel, 0); }
 
 void AppSettings::setBpm (double value)             { set (keys::bpm, value); }
