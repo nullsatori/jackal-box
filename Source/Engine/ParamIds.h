@@ -80,6 +80,7 @@ constexpr ParamId insertParam (int chain, int slot, InsertParam) noexcept
 // Model/ParamSpec.h adds names, ranges and units on top of these.
 constexpr std::array<float, kNumTrackParams> kTrackParamDefaults { 0.f, 0.f, 0.f, 5000.f, 20000.f, 0.f, 1.f, 0.f };
 constexpr float kMasterGainDefaultDb = -6.f;
+constexpr float kMasterGainNewProjectDb = -40.f;   // 1% amplitude: a new project starts quiet (the engine keeps -6 dB)
 
 // UI writes, audio reads relaxed (once per block, or at trigger time for p-locks).
 struct ParamTable

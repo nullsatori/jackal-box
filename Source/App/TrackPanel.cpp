@@ -38,7 +38,7 @@ TrackPanel::TrackPanel (ProjectController& controller)
     addChildComponent (vst);
 
     masterGain.setRange (kMasterGainSpec.minValue, kMasterGainSpec.maxValue, 0.1);
-    masterGain.setDoubleClickReturnValue (true, kMasterGainDefaultDb);
+    masterGain.setDoubleClickReturnValue (true, kMasterGainNewProjectDb);
     masterGain.textFromValueFunction = [] (double v) { return juce::String (v, 1) + " dB"; };
     masterGain.onValueChange = [this] { if (! refreshing_) c_.setMasterGainDb (static_cast<float> (masterGain.getValue())); };
     addChildComponent (masterGain);

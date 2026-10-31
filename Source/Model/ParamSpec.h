@@ -32,7 +32,7 @@ constexpr std::array<ParamSpecEntry, kNumTrackParams> kTrackParamSpecs { {
     { "shakal", "SHAKAL",  0.f,     1.f, kTrackParamDefaults[7], "" },
 } };
 
-constexpr ParamSpecEntry kMasterGainSpec { "masterGain", "MASTER", -24.f, 6.f, kMasterGainDefaultDb, "dB" };
+constexpr ParamSpecEntry kMasterGainSpec { "masterGain", "MASTER", -60.f, 6.f, kMasterGainNewProjectDb, "dB" };
 
 // ---- SHAKAL chains (stage 3)
 
